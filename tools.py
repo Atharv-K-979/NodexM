@@ -35,5 +35,3 @@ def scrape_url(url: str) -> str:
     except Exception as e:
         return f"Could not scrape URL: {str(e)}"
     
-    
-print(scrape_url.invoke("https://www.calmu.edu/news/future-of-artificial-intelligence"))
