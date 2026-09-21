@@ -1,5 +1,15 @@
 from agents import build_reader_agent,build_search_agent, writer_chain , critic_chain
 
+def _extract_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "\n".join(
+            item.get("text", "") if isinstance(item, dict) else getattr(item, "text", str(item))
+            for item in content
+        )
+    return str(content)
+
 def run_research_pipeline(topic : str) -> dict:
 
     state = {}
@@ -11,11 +21,15 @@ def run_research_pipeline(topic : str) -> dict:
 
     search_agent = build_search_agent()
     search_result = search_agent.invoke({
-        "messages" : [("user", f"Find recent, reliable and detailed information about: {topic}")]
+        "messages" : [("user", f"Find recent, reliable and detailed information about: {topic}. Include the source URLs.")]
     })
-    state["search_results"] = search_result['messages'][-1].content
+    state["search_results"] = _extract_text(search_result['messages'][-1].content)
 
     print("\n search result ",state['search_results'])
+
+    # Capture raw tool outputs so reader agent is guaranteed to have actual URLs
+    tool_outputs = [str(m.content) for m in search_result.get('messages', []) if getattr(m, 'type', '') == 'tool']
+    search_context = "\n".join(tool_outputs) if tool_outputs else state["search_results"]
 
     #step 2 - reader agent 
     print("\n"+" ="*50)
@@ -25,13 +39,13 @@ def run_research_pipeline(topic : str) -> dict:
     reader_agent = build_reader_agent()
     reader_result = reader_agent.invoke({
         "messages": [("user",
-            f"Based on the following search results about '{topic}', "
-            f"pick the most relevant URL and scrape it for deeper content.\n\n"
-            f"Search Results:\n{state['search_results'][:800]}"
+            f"Based on these search sources for '{topic}', "
+            f"pick the single best URL, call scrape_url once with that URL, and summarize the key facts.\n\n"
+            f"Sources:\n{search_context[:2500]}"
         )]
     })
 
-    state['scraped_content'] = reader_result['messages'][-1].content
+    state['scraped_content'] = _extract_text(reader_result['messages'][-1].content)
 
     print("\nscraped content: \n", state['scraped_content'])
 

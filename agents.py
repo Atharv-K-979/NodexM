@@ -1,13 +1,22 @@
+import os
 from langchain.agents import create_agent
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from tools import web_search,scrape_url 
 from dotenv import load_dotenv
 load_dotenv()
 
-#model setup
-llm = ChatOpenAI(model = "gpt-4o-mini",temperature=0)
+#model setup with automatic fallback across models to prevent 429 quota limits
+api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+primary_model = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
+
+primary_llm = ChatGoogleGenerativeAI(model=primary_model, api_key=api_key)
+fallback_models = ["gemini-3.1-flash-lite", "gemini-3.8-flash"]
+fallbacks = [ChatGoogleGenerativeAI(model=m, api_key=api_key) for m in fallback_models if m != primary_model]
+
+llm = primary_llm.with_fallbacks(fallbacks)
 
 #1st agent
 def build_search_agent():
