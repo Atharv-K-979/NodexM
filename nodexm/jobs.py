@@ -59,10 +59,14 @@ class EventHub:
         """Safe to call from worker threads."""
         with self._lock:
             subs = list(self._subs.get(run_id, ()))
-        if not subs or self.loop is None:
+        loop = self.loop
+        if not subs or loop is None or loop.is_closed():
             return
         for q in subs:
-            self.loop.call_soon_threadsafe(_put, q, event)
+            try:
+                loop.call_soon_threadsafe(_put, q, event)
+            except RuntimeError:  # loop closed during shutdown
+                return
 
 
 def _put(q: asyncio.Queue, event: dict) -> None:
@@ -266,8 +270,12 @@ class JobRunner:
         self._tasks: list[asyncio.Task] = []
 
     def wake(self) -> None:
-        if self._wake is not None and hub.loop is not None:
-            hub.loop.call_soon_threadsafe(self._wake.set)
+        loop = hub.loop
+        if self._wake is not None and loop is not None and not loop.is_closed():
+            try:
+                loop.call_soon_threadsafe(self._wake.set)
+            except RuntimeError:
+                pass
 
     def cancel(self, run_id: str) -> None:
         _cancelled.add(run_id)
@@ -290,6 +298,8 @@ class JobRunner:
         for t in self._tasks:
             t.cancel()
         self._tasks = []
+        self._wake = None
+        hub.loop = None
 
     async def _dispatch(self) -> None:
         while True:
