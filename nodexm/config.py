@@ -82,6 +82,7 @@ class Settings:
     reader_provider: str = field(default_factory=lambda: _str("READER_PROVIDER", "auto"))  # auto | jina | local
     semantic_scholar_api_key: str = field(default_factory=lambda: _str("S2_API_KEY"))
     fred_api_key: str = field(default_factory=lambda: _str("FRED_API_KEY"))
+    openalex_api_key: str = field(default_factory=lambda: _str("OPENALEX_API_KEY"))
     contact_email: str = field(default_factory=lambda: _str("CONTACT_EMAIL", "nodexm@example.com"))
     cache_ttl_hours: int = field(default_factory=lambda: _int("CACHE_TTL_HOURS", 24))
 
