@@ -223,3 +223,4 @@ __marimo__/
 .nodexm_secret
 frontend/node_modules/
 frontend/dist/
+*.tsbuildinfo

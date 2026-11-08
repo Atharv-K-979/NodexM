@@ -2,19 +2,64 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
-  height: 100%;
+:root {
+  --bg: 12 14 17;
+  --side: 17 20 24;
+  --card: 22 26 31;
+  --raised: 30 35 42;
+  --line: 40 46 55;
+  --fg: 230 232 235;
+  --muted: 150 159 171;
+  --faint: 96 105 117;
+  --accent: 138 164 255;
+  --accent-ink: 12 18 38;
+  --agreed: 84 201 145;
+  --disputed: 242 116 108;
+  --single: 228 182 82;
+  color-scheme: dark;
 }
 
+html, body, #root { height: 100%; }
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  @apply bg-bg text-fg font-sans antialiased;
+  font-feature-settings: "ss01", "cv11";
+}
+::selection { background: rgb(var(--accent) / 0.3); }
+* { scrollbar-width: thin; scrollbar-color: rgb(var(--line)) transparent; }
+:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 2px; border-radius: 6px; }
+
+@layer components {
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed; }
+  .btn-primary { @apply btn bg-accent text-accent-ink hover:bg-accent/90; }
+  .btn-ghost { @apply btn text-muted hover:text-fg hover:bg-raised; }
+  .btn-outline { @apply btn border border-line text-fg hover:bg-raised; }
+  .input { @apply w-full rounded-lg border border-line bg-card px-3 py-2 text-sm text-fg placeholder:text-faint focus:border-accent/60 focus:outline-none focus:ring-2 focus:ring-accent/20; }
+  .label { @apply block text-xs font-medium uppercase tracking-wider text-faint mb-1.5; }
+  .chip { @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[10.5px] font-medium uppercase tracking-wide; }
+  .chip-agreed { @apply chip bg-agreed/15 text-agreed; }
+  .chip-disputed { @apply chip bg-disputed/15 text-disputed; }
+  .chip-single { @apply chip bg-single/15 text-single; }
+  .chip-neutral { @apply chip bg-raised text-muted; }
+  .skeleton { background: linear-gradient(90deg, rgb(var(--card)) 0, rgb(var(--raised)) 40%, rgb(var(--card)) 80%); background-size: 800px 100%; @apply animate-shimmer rounded; }
 }
 
-.trace-enter {
-  animation: traceIn 0.3s ease-out;
-}
+/* Answer typography */
+.answer { @apply text-[15.5px] leading-7 text-fg/90; }
+.answer h1, .answer h2 { @apply mt-8 mb-3 font-serif text-xl font-semibold text-fg first:mt-0; }
+.answer h3 { @apply mt-6 mb-2 text-base font-semibold text-fg; }
+.answer p { @apply my-3; }
+.answer ul { @apply my-3 list-disc pl-5 space-y-1.5; }
+.answer ol { @apply my-3 list-decimal pl-5 space-y-1.5; }
+.answer li::marker { color: rgb(var(--faint)); }
+.answer strong { @apply font-semibold text-fg; }
+.answer a { @apply text-accent underline decoration-accent/30 underline-offset-2 hover:decoration-accent; }
+.answer table { @apply my-4 w-full border-collapse text-sm; }
+.answer th { @apply border-b border-line px-3 py-2 text-left font-mono text-[11px] font-medium uppercase tracking-wide text-faint; }
+.answer td { @apply border-b border-line/60 px-3 py-2 align-top; font-variant-numeric: tabular-nums; }
+.answer code { @apply rounded bg-raised px-1 py-0.5 font-mono text-[13px]; }
+.answer blockquote { @apply my-3 border-l-2 border-line pl-4 text-muted; }
+.answer .disputed-mark { @apply rounded bg-disputed/15 px-1 text-disputed; }
 
-@keyframes traceIn {
-  from { opacity: 0; transform: translateY(-4px); }
-  to   { opacity: 1; transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
 }
