@@ -201,13 +201,14 @@ def find_gaps(llm: LLMClient, question: str, coverage: list[dict]) -> GapOut:
     return out
 
 
-def challenge(llm: LLMClient, question: str, agreed_claims: list[str]) -> ChallengeOut:
+def challenge(llm: LLMClient, question: str, claims: list[str]) -> ChallengeOut:
     system = (
-        "You are a devil's advocate. For the most important agreed claims, write at most 3 search queries that "
-        "would find credible evidence AGAINST them: newer figures, official corrections, critiques, or studies "
-        f"with different results. Pick the best searcher for each. Searchers: {SEARCHER_GUIDE}"
+        "You are a devil's advocate. Write at most 3 search queries that test the most important claims. "
+        "For an AGREED claim, look for credible evidence against it: newer figures, official corrections, "
+        "critiques, or studies with different results. For a DISPUTED claim, look for the authoritative source "
+        f"that would settle it. Pick the best searcher for each. Searchers: {SEARCHER_GUIDE}"
     )
-    user = f"Question: {question}\n\nAgreed claims:\n" + "\n".join(f"- {c}" for c in agreed_claims)
+    user = f"Question: {question}\n\nClaims:\n" + "\n".join(f"- {c}" for c in claims)
     out = llm.structured("lite", ChallengeOut, system, user, agent="devils_advocate")
     out.queries = out.queries[:3]
     return out
