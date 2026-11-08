@@ -421,7 +421,7 @@ def verify_node(state: State, config) -> dict:
         clusters.append({
             "text": text, "status": status, "confidence": conf, "note": note, "source_indices": src_ids,
             "sub_questions": sorted({m["sub_question"] for m in members if m["sub_question"]}),
-            "embedding": centroid([vectors[m["id"]] for m in members]) if method == "embedding" else None,
+            "embedding": centroid([vectors[m["id"]] for m in members]),
             "evidence": [{"claim_id": m["id"], "source_idx": m["source_idx"], "statement": m["text"],
                           "quote": m["quote"], "start": m["start"], "end": m["end"],
                           "stance": stances.get(m["id"], "supports")} for m in members],

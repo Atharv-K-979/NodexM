@@ -114,7 +114,10 @@ def tokens(text: str) -> list[str]:
     return [w.strip(".'") for w in WORD.findall(text.lower().translate(_QUOTES)) if w.strip(".'") not in STOP]
 
 
-def lexical_vectors(texts: list[str], dim: int = 2048) -> list[list[float]]:
+LEXICAL_DIM = 2048
+
+
+def lexical_vectors(texts: list[str], dim: int = LEXICAL_DIM) -> list[list[float]]:
     """Hashed bag of words + bigrams. Used when embeddings are unavailable."""
     out = []
     for t in texts:
