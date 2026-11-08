@@ -13,7 +13,8 @@ load_dotenv(ROOT / ".env")
 
 
 def _str(name: str, default: str = "") -> str:
-    return os.getenv(name, default).strip()
+    """Blank values in .env (e.g. `DATABASE_URL=`) mean 'use the default'."""
+    return (os.getenv(name) or "").strip() or default
 
 
 def _int(name: str, default: int) -> int:
@@ -31,7 +32,7 @@ def _float(name: str, default: float) -> float:
 
 
 def _list(name: str, default: str = "") -> list[str]:
-    return [x.strip() for x in os.getenv(name, default).split(",") if x.strip()]
+    return [x.strip() for x in (os.getenv(name) or default).split(",") if x.strip()]
 
 
 def _load_secret() -> str:
