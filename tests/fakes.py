@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 
 from nodexm import agents
 from nodexm.evidence import numbers_in
@@ -47,7 +48,9 @@ def fake_read(url):
 
 
 class FakeLLM:
-    def __init__(self, critic_scores=(8,), report=None):
+    def __init__(self, critic_scores=(8,), report=None, verifier_down=False, leave_out=0):
+        self.verifier_down = verifier_down
+        self.leave_out = leave_out
         self.usage = Usage()
         self.critic_scores = list(critic_scores)
         self.report = report
@@ -73,23 +76,22 @@ class FakeLLM:
                 out.append(agents.SourceClaims(source_number=int(number), claims=[
                     agents.ExtractedClaim(claim=first, quote=first, kind="figure")]))
             return agents.ExtractOut(sources=out)
-        if schema is agents.VerifyOut:
-            clusters = json.loads(user.split("Clusters:\n", 1)[1])
-            verdicts = []
-            for c in clusters:
-                numbers = [numbers_in(s["text"]) for s in c["statements"]]
-                majority = max(numbers, key=numbers.count)
-                disputed = any(n != majority for n in numbers)
-                verdicts.append(agents.ClusterVerdict(
-                    cluster_id=c["cluster_id"],
-                    canonical_claim=("Estimates of SME compliance costs differ." if disputed
-                                     else c["statements"][0]["text"]),
-                    status="disputed" if disputed else "agreed",
-                    note="Most sources give 6,000 euros; one blog gives 12,000." if disputed else "",
-                    stances=[agents.Stance(statement_id=s["statement_id"],
-                                           stance="supports" if n == majority else "contradicts")
-                             for s, n in zip(c["statements"], numbers)]))
-            return agents.VerifyOut(verdicts=verdicts)
+        if schema is agents.GroupOut:
+            if self.verifier_down:
+                from nodexm.llm import LLMError
+                raise LLMError("verifier model unavailable")
+            statements = json.loads(user.split("Statements:\n", 1)[1])
+            numbers = {st["id"]: frozenset(numbers_in(st["text"])) for st in statements}
+            majority = Counter(numbers.values()).most_common(1)[0][0]
+            ids = [st["id"] for st in statements][: len(statements) - self.leave_out]
+            against = [i for i in ids if numbers[i] != majority]
+            return agents.GroupOut(groups=[agents.FactGroup(
+                statement_ids=ids,
+                canonical_claim=("Estimates of SME compliance costs differ." if against
+                                 else statements[0]["text"]),
+                status="disputed" if against else "agreed",
+                contradicting_ids=against,
+                note="Most sources give 6,000 euros; one blog gives 12,000." if against else "")])
         if schema is agents.GapOut:
             return agents.GapOut(sufficient=True, queries=[])
         if schema is agents.ChallengeOut:

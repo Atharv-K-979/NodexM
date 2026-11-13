@@ -10,10 +10,11 @@ import html
 
 from sqlmodel import Session, select
 
-from .evidence import LEXICAL_DIM, cosine, lexical_vectors
+from .evidence import LEXICAL_DIM, cosine, lexical_vectors, periods_compatible
 from .models import ChangeEvent, Claim, LedgerClaim, Run, Watch, utcnow
 
-EMBED_MATCH = 0.86
+# Gemini embeddings put different facts on one topic at ~0.94, paraphrases at ~0.98.
+EMBED_MATCH = 0.96
 LEXICAL_MATCH = 0.5
 STALE_AFTER_MISSES = 2
 
@@ -21,6 +22,8 @@ STALE_AFTER_MISSES = 2
 def _similarity(a_text: str, a_vec, b_text: str, b_vec) -> tuple[float, float]:
     """Compare the centroids of the underlying statements when both sides used the same vector kind,
     so a claim still matches after its summary sentence changes (e.g. agreed -> disputed)."""
+    if periods_compatible(a_text, b_text) is False:
+        return 0.0, 1.0  # different years: never the same fact
     if a_vec and b_vec and len(a_vec) == len(b_vec):
         return cosine(a_vec, b_vec), (LEXICAL_MATCH if len(a_vec) == LEXICAL_DIM else EMBED_MATCH)
     va, vb = lexical_vectors([a_text, b_text])

@@ -52,21 +52,16 @@ class ExtractOut(BaseModel):
     sources: list[SourceClaims]
 
 
-class Stance(BaseModel):
-    statement_id: str
-    stance: Literal["supports", "contradicts", "unrelated"]
-
-
-class ClusterVerdict(BaseModel):
-    cluster_id: str
-    canonical_claim: str
+class FactGroup(BaseModel):
+    statement_ids: list[str] = Field(description="Ids of the statements that assert this same fact")
+    canonical_claim: str = Field(description="One precise sentence stating the fact, or the dispute")
     status: Literal["agreed", "disputed"]
-    note: str = Field(description="For disputed: who says what. For agreed: empty or a short caveat")
-    stances: list[Stance]
+    contradicting_ids: list[str] = Field(description="Ids of statements that conflict with the canonical claim")
+    note: str = Field(description="For disputed: who says what. Otherwise empty or a short caveat")
 
 
-class VerifyOut(BaseModel):
-    verdicts: list[ClusterVerdict]
+class GroupOut(BaseModel):
+    groups: list[FactGroup]
 
 
 class FollowUpQuery(BaseModel):
@@ -169,20 +164,24 @@ def extract(llm: LLMClient, question: str, sources: list[dict], max_claims: int)
 # ---------------------------------------------------------------------------
 # 7. Verifier
 # ---------------------------------------------------------------------------
-def verify(llm: LLMClient, question: str, clusters: list[dict]) -> VerifyOut:
+def group_and_verify(llm: LLMClient, question: str, statements: list[dict]) -> GroupOut:
     system = (
-        "You verify claims across independent sources. Each cluster groups statements from different sources "
-        "that appear to be about the same fact. For each cluster:\n"
-        "- status 'agreed' when the statements are compatible (rounding, wording or extra detail is fine).\n"
-        "- status 'disputed' only when at least two statements are genuinely incompatible: different figures "
-        "beyond rounding, opposite conclusions, or different dates for the same event.\n"
-        "Most clusters are agreed; never invent a dispute. Give each statement a stance relative to your "
-        "canonical claim: supports, contradicts, or unrelated (it is about something else).\n"
-        "canonical_claim: one precise sentence. For a disputed cluster, state the dispute neutrally, e.g. "
-        "'Estimates of X differ: one source gives A, another gives B.' and explain who says what in note."
+        "You verify research evidence. You get numbered statements, each extracted from a source.\n"
+        "1. Group the statements that assert the SAME specific fact: the same measure or event, the same "
+        "subject, and the same time period. Keep different years, different measures (for example total "
+        "consumption in TWh versus share of demand in %), different regions and different subjects in separate "
+        "groups. A statement with nothing in common with the others is its own group.\n"
+        "2. Within each group decide the status. 'agreed' when the statements are compatible (rounding, wording "
+        "or extra detail is fine). 'disputed' when sources give incompatible values beyond rounding, opposite "
+        "conclusions, or different estimates or forecasts of the same quantity for the same period. List the "
+        "statements that conflict with your canonical claim in contradicting_ids. Never invent a dispute.\n"
+        "3. canonical_claim: one precise, self-contained sentence with units and period. For a disputed group "
+        "state the disagreement neutrally, for example 'Forecasts of X for 2030 differ: A projects 945 TWh, B "
+        "projects 1,065 TWh.' and say who says what in note.\n"
+        "Every statement id must appear in exactly one group."
     )
-    user = f"Research question: {question}\n\nClusters:\n{json.dumps(clusters, ensure_ascii=False, indent=1)}"
-    return llm.structured("flash", VerifyOut, system, user, agent="verifier", temperature=0.0)
+    user = f"Research question: {question}\n\nStatements:\n{json.dumps(statements, ensure_ascii=False, indent=1)}"
+    return llm.structured("flash", GroupOut, system, user, agent="verifier", temperature=0.0)
 
 
 # ---------------------------------------------------------------------------

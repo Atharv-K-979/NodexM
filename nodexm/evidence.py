@@ -159,6 +159,76 @@ def cluster(vectors: list[list[float]], threshold: float) -> list[list[int]]:
     return groups
 
 
+YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d\d|21[0-4]\d)\b")
+
+
+def years_in(text: str) -> set[str]:
+    return set(YEAR_RE.findall(text))
+
+
+def periods_compatible(a: str, b: str) -> bool | None:
+    """False when both texts name years and none overlap (different periods, so different facts).
+    True when they share a year, None when at least one names no year."""
+    ya, yb = years_in(a), years_in(b)
+    if ya and yb:
+        return bool(ya & yb)
+    return None
+
+
+def group_claims(texts: list[str], vectors: list[list[float]], lexical: bool) -> list[list[int]]:
+    """Fallback fact grouping when the verifier model is unavailable.
+
+    Embeddings rate every claim on a narrow topic as very similar (0.9+), so a plain threshold
+    merges different facts. This uses complete linkage (similar to every member, not to a drifting
+    centroid), never merges claims about different years, and asks for more similarity when a
+    claim names no year.
+    """
+    same_year, no_year = (0.5, 0.6) if lexical else (0.94, 0.975)
+    vecs = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(vecs, axis=1, keepdims=True)
+    vecs = vecs / np.where(norms == 0, 1, norms)
+    sims = vecs @ vecs.T
+
+    def affinity(i: int, j: int) -> float:
+        compatible = periods_compatible(texts[i], texts[j])
+        if compatible is False:
+            return 0.0
+        need = same_year if compatible else no_year
+        return float(sims[i, j]) if sims[i, j] >= need else 0.0
+
+    groups: list[list[int]] = []
+    for i in range(len(texts)):
+        best, best_score = None, 0.0
+        for g in groups:
+            score = min(affinity(i, j) for j in g)
+            if score > best_score:
+                best, best_score = g, score
+        if best is None:
+            groups.append([i])
+        else:
+            best.append(i)
+    return groups
+
+
+def pack_batches(vectors: list[list[float]], limit: int, lexical: bool) -> list[list[int]]:
+    """Split many claims into verifier batches of at most `limit`, keeping each topic together."""
+    n = len(vectors)
+    if n <= limit:
+        return [list(range(n))]
+    topics = sorted(cluster(vectors, 0.3 if lexical else 0.9), key=len, reverse=True)
+    batches: list[list[int]] = []
+    for topic in topics:
+        for k in range(0, len(topic), limit):
+            part = topic[k:k + limit]
+            for b in batches:
+                if len(b) + len(part) <= limit:
+                    b.extend(part)
+                    break
+            else:
+                batches.append(list(part))
+    return batches
+
+
 def centroid(vectors: list[list[float]]) -> list[float]:
     m = np.mean(np.asarray(vectors, dtype=np.float32), axis=0)
     n = np.linalg.norm(m)

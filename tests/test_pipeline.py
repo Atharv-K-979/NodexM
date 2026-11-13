@@ -46,7 +46,9 @@ def test_deep_run_end_to_end():
     assert "## Sources" in result["report_md"] and "<h2>" in result["report_html"]
     nodes = {n for n, _, _ in events}
     assert {"router", "planner", "searcher", "reader", "credibility", "extractor", "clusterer", "verifier",
-            "devils_advocate", "writer", "citation_auditor", "critic", "finalize"} <= nodes
+            "gap_finder", "devils_advocate", "writer", "citation_auditor", "critic", "finalize"} <= nodes
+    # Deep mode verifies before the devil's advocate and once more after it, not every round
+    assert llm.calls.count("verifier") == 2
     assert llm.usage.cost() > 0
 
 
@@ -73,3 +75,31 @@ def test_unsupported_numbers_are_flagged_by_the_audit():
     result = run_pipeline(ctx, question="q", requested_mode="quick")
     assert result["audit"]["score"] == 0.0
     assert "45000" in result["audit"]["issues"][0]["problem"]
+
+
+def test_statements_the_verifier_leaves_out_are_kept_as_single_source():
+    ctx, _ = make_ctx(FakeLLM(leave_out=1))
+    result = run_pipeline(ctx, question="q", requested_mode="quick")
+    statuses = sorted(c["status"] for c in result["clusters"])
+    assert "single_source" in statuses and len(result["clusters"]) == 2
+
+
+def test_verifier_outage_falls_back_to_automatic_grouping():
+    ctx, events = make_ctx(FakeLLM(verifier_down=True))
+    result = run_pipeline(ctx, question="q", requested_mode="quick")
+    assert result["clusters"]
+    assert any(n == "verifier" and s == "warning" for n, s, _ in events)
+    # the number check still spots the conflicting figure
+    assert any(c["status"] == "disputed" for c in result["clusters"])
+
+
+def test_figure_ranges_only_compare_the_same_period():
+    figs = [
+        {"label": "Data centre electricity", "unit": "TWh", "period": "2024", "value": 415.0},
+        {"label": "Data centre electricity", "unit": "TWh", "period": "2030", "value": 945.0},
+        {"label": "data centre electricity", "unit": "TWh", "period": "by 2030", "value": 1065.0},
+        {"label": "Data centre electricity", "unit": "TWh", "period": "2022", "value": 460.0},
+    ]
+    assert pipeline.mark_ranges(figs) == 1
+    assert "range" not in figs[0] and "range" not in figs[3]
+    assert figs[1]["range"] == figs[2]["range"] == [945.0, 1065.0]

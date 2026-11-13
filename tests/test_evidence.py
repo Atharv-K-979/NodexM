@@ -1,6 +1,8 @@
 from nodexm.credibility import score_source
 from nodexm.evidence import (
     audit_citations,
+    group_claims,
+    pack_batches,
     cluster,
     confidence,
     find_duplicates,
@@ -78,3 +80,21 @@ def test_audit_flags_unsupported_numbers():
     assert audit["checked"] == 2 and audit["supported"] == 1
     problems = " ".join(i["problem"] for i in audit["issues"])
     assert "90000" in problems and "without a citation" in problems
+
+
+def test_fallback_grouping_never_merges_different_years():
+    texts = [
+        "Global data centre electricity consumption was 415 TWh in 2024.",
+        "In 2024 data centres consumed about 415 TWh of electricity worldwide.",
+        "Global data centre electricity consumption will reach 945 TWh in 2030.",
+        "Data centre electricity use is projected to hit 945 TWh by 2030.",
+    ]
+    groups = group_claims(texts, lexical_vectors(texts), lexical=True)
+    assert sorted(map(sorted, groups)) == [[0, 1], [2, 3]]
+
+
+def test_pack_batches_respects_the_limit():
+    vecs = lexical_vectors([f"claim about topic {i % 3} number {i}" for i in range(130)])
+    batches = pack_batches(vecs, 60, lexical=True)
+    assert all(len(b) <= 60 for b in batches)
+    assert sorted(i for b in batches for i in b) == list(range(130))

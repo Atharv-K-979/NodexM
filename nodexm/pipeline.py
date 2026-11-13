@@ -1,8 +1,10 @@
 """The research graph.
 
-router -> planner -> search -> read -> extract -> verify -> research_review
-   research_review loops back to search (gap finder, at most 2 rounds; then one
-   devil's-advocate round in deep mode) or moves on to the analyst.
+router -> planner -> search -> read -> extract -> gap_review
+   gap_review loops back to search (at most 2 extra rounds in Deep mode) or moves on to verify.
+verify -> challenge_review
+   challenge_review sends one devil's-advocate round back to search in Deep mode, then the
+   new evidence is verified again before moving on to the analyst.
 analyst -> writer -> draft_review -> (writer again, at most N revisions) -> finalize
 
 Progress is reported through ctx.emit as it happens, so the UI trace is live
@@ -26,12 +28,13 @@ from .evidence import (
     CITE,
     audit_citations,
     centroid,
-    cluster,
     confidence,
     find_duplicates,
+    group_claims,
     lexical_vectors,
     locate_quote,
     numbers_in,
+    pack_batches,
     parse_citation,
     tokens,
 )
@@ -41,8 +44,6 @@ from .search import SearchContext, domain_of, normalize_url, run_searcher, searc
 
 log = logging.getLogger("nodexm.pipeline")
 
-EMBED_THRESHOLD = 0.84
-LEXICAL_THRESHOLD = 0.45
 
 BUDGETS: dict[str, dict[str, Any]] = {
     "quick": dict(max_queries=5, max_sources=8, first_round=8, later_round=0, gap_rounds=0, challenge=False,
@@ -87,7 +88,7 @@ class State(TypedDict, total=False):
     claims: list[dict]
     vectors: dict
     vector_method: str
-    verdict_cache: dict
+    verified_ids: list[str]
     clusters: list[dict]
     round: int
     challenge_done: bool
@@ -114,7 +115,13 @@ def _budget(state: State) -> dict:
 
 
 def _plural(n: int, word: str) -> str:
-    return f"{n} {word}{'' if n == 1 else 's'}"
+    if n == 1:
+        return f"{n} {word}"
+    if word.endswith(("s", "sh", "ch", "x")):
+        return f"{n} {word}es"
+    if word.endswith("y") and word[-2:-1] not in "aeiou":
+        return f"{n} {word[:-1]}ies"
+    return f"{n} {word}s"
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +148,7 @@ def router_node(state: State, config) -> dict:
     ctx.emit("router", "end", f"{mode.title()} mode. {reason}", {"mode": mode, "question": standalone})
     return {"mode": mode, "standalone": standalone, "round": 0, "revision": 0, "challenge_done": False,
             "sources": [], "claims": [], "clusters": [], "queries_run": [], "extracted_upto": 0,
-            "vectors": {}, "verdict_cache": {}, "vector_method": "embedding"}
+            "vectors": {}, "verified_ids": [], "vector_method": "embedding"}
 
 
 # ---------------------------------------------------------------------------
@@ -233,15 +240,20 @@ def read_node(state: State, config) -> dict:
     ctx.emit("reader", "start", f"Reading {_plural(len(candidates), 'source')} in full")
 
     def one(hit: dict) -> dict | None:
-        page = read(hit["url"])
-        text = page.text if page.ok else ""
-        if len(hit.get("text") or "") >= 200 and len(text) < len(hit["text"]):
-            text = hit["text"]  # abstracts and data series from the API
+        given = hit.get("text") or ""
+        if len(given) >= 2000:  # the search API already returned the page text (Tavily raw content)
+            page, text = None, given
+        else:
+            page = read(hit["url"])
+            text = page.text if page.ok else ""
+            if len(given) >= 200 and len(text) < len(given):
+                text = given  # abstracts and data series from the API
         if len(text) < 200:
             return None
-        return {"url": hit["url"], "title": (hit.get("title") or page.title or hit["url"])[:300],
+        return {"url": hit["url"], "title": (hit.get("title") or (page.title if page else "") or hit["url"])[:300],
                 "domain": domain_of(hit["url"]), "source_type": hit.get("source_type", "web"),
-                "searcher": hit.get("searcher", "web"), "published": hit.get("published") or page.published,
+                "searcher": hit.get("searcher", "web"),
+                "published": hit.get("published") or (page.published if page else None),
                 "snippet": hit.get("snippet", ""), "text": text, "sub_question": hit.get("sub_q", ""),
                 "phase": hit.get("phase", "research"), "extra": hit.get("extra") or {}}
 
@@ -340,6 +352,9 @@ def extract_node(state: State, config) -> dict:
 # ---------------------------------------------------------------------------
 # 6. Clusterer + 7. Verifier
 # ---------------------------------------------------------------------------
+VERIFY_BATCH = 60
+
+
 def _fallback_verdict(members: list[dict]) -> dict:
     """Used only if the verifier model fails: different number sets mean a dispute."""
     number_sets = {frozenset(numbers_in(m["text"])) for m in members if numbers_in(m["text"])}
@@ -349,14 +364,8 @@ def _fallback_verdict(members: list[dict]) -> dict:
             "stances": {m["id"]: "supports" for m in members}}
 
 
-def verify_node(state: State, config) -> dict:
-    ctx = _ctx(config)
-    sources = {s["idx"]: s for s in state.get("sources", [])}
-    claims = [c for c in state.get("claims", []) if sources[c["source_idx"]].get("duplicate_of") is None]
-    if not claims:
-        return {"clusters": []}
-    ctx.emit("clusterer", "start", f"Grouping {_plural(len(claims), 'claim')} that state the same fact")
-
+def _claim_vectors(ctx: RunContext, state: State, claims: list[dict]) -> tuple[dict, str]:
+    """Embeddings for every claim (kept for batching and the Watch ledger); word vectors as fallback."""
     vectors = dict(state.get("vectors", {}))
     method = state.get("vector_method", "embedding")
     missing = [c for c in claims if c["id"] not in vectors]
@@ -370,52 +379,74 @@ def verify_node(state: State, config) -> dict:
     if method == "lexical":
         missing = [c for c in claims if c["id"] not in vectors]
         vectors.update({c["id"]: v for c, v in zip(missing, lexical_vectors([c["text"] for c in missing]))})
+    return vectors, method
 
-    groups = cluster([vectors[c["id"]] for c in claims],
-                     EMBED_THRESHOLD if method == "embedding" else LEXICAL_THRESHOLD)
-    groups = [[claims[i] for i in g] for g in groups]
-    multi = [g for g in groups if len({m["source_idx"] for m in g}) > 1]
-    ctx.emit("clusterer", "end", f"{_plural(len(groups), 'distinct claim')}, {len(multi)} reported by 2+ sources",
-             {"method": method})
 
-    # Verify multi-source clusters, reusing verdicts from earlier rounds when membership is unchanged.
-    cache = dict(state.get("verdict_cache", {}))
-    pending = [(f"K{i}", g) for i, g in enumerate(multi) if "|".join(sorted(m["id"] for m in g)) not in cache]
-    if pending:
-        ctx.emit("verifier", "start", f"Checking {_plural(len(pending), 'cluster')} for agreement or conflict")
+def verify_node(state: State, config) -> dict:
+    """Group claims by the fact they state and decide agreed / disputed / single-source.
 
-    def run(batch):
-        payload = [{"cluster_id": cid, "statements": [
-            {"statement_id": m["id"], "source": m["source_idx"] + 1, "text": m["text"], "quote": m["quote"][:400]}
-            for m in g[:8]]} for cid, g in batch]
+    The verifier model does the grouping: embeddings rate every claim on a narrow topic as
+    near-identical, so they cannot tell "415 TWh in 2024" from "945 TWh by 2030". Embeddings
+    are only used to split very large runs into batches and as the offline fallback.
+    """
+    ctx = _ctx(config)
+    sources = {s["idx"]: s for s in state.get("sources", [])}
+    claims = [c for c in state.get("claims", []) if sources[c["source_idx"]].get("duplicate_of") is None]
+    if not claims:
+        return {"clusters": []}
+    claim_ids = sorted(c["id"] for c in claims)
+    if claim_ids == state.get("verified_ids"):
+        return {}  # nothing new since the last verification
+    ctx.emit("verifier", "start", f"Grouping {_plural(len(claims), 'claim')} by fact and checking agreement")
+
+    vectors, method = _claim_vectors(ctx, state, claims)
+    lexical = method == "lexical"
+    batches = [[claims[i] for i in b] for b in pack_batches([vectors[c["id"]] for c in claims], VERIFY_BATCH, lexical)]
+
+    def run(batch: list[dict]):
+        payload = [{"id": m["id"], "source": m["source_idx"] + 1, "text": m["text"]} for m in batch]
         try:
-            out = agents.verify(ctx.llm, state["standalone"], payload)
-            return {v.cluster_id: {"canonical_claim": v.canonical_claim, "status": v.status, "note": v.note,
-                                   "stances": {s.statement_id: s.stance for s in v.stances}} for v in out.verdicts}
+            return batch, agents.group_and_verify(ctx.llm, state["standalone"], payload).groups
         except LLMError as e:
-            ctx.warn("verifier", f"Verifier unavailable for {_plural(len(batch), 'cluster')}, used a number check "
-                                 f"instead ({str(e)[:60]})")
-            return {}
+            ctx.warn("verifier", f"Verifier unavailable, grouped claims automatically instead ({str(e)[:60]})")
+            return batch, None
 
-    batches = [pending[i:i + 8] for i in range(0, len(pending), 8)]
     with ThreadPoolExecutor(max_workers=3) as pool:
-        verdicts = {k: v for out in pool.map(run, batches) for k, v in out.items()}
-    for cid, g in pending:
-        cache["|".join(sorted(m["id"] for m in g))] = verdicts.get(cid) or _fallback_verdict(g)
+        results = list(pool.map(run, batches))
+
+    grouped: list[tuple[list[dict], dict | None]] = []
+    for batch, groups in results:
+        if groups is None:
+            for g in group_claims([m["text"] for m in batch], [vectors[m["id"]] for m in batch], lexical):
+                members = [batch[i] for i in g]
+                grouped.append((members, _fallback_verdict(members)))
+            continue
+        by_id, seen = {m["id"]: m for m in batch}, set()
+        for fg in groups:
+            members = [by_id[i] for i in dict.fromkeys(fg.statement_ids) if i in by_id and i not in seen]
+            if not members:
+                continue
+            seen.update(m["id"] for m in members)
+            against = set(fg.contradicting_ids)
+            grouped.append((members, {"canonical_claim": fg.canonical_claim, "status": fg.status, "note": fg.note,
+                                      "stances": {m["id"]: "contradicts" if m["id"] in against else "supports"
+                                                  for m in members}}))
+        grouped += [([m], None) for m in batch if m["id"] not in seen]  # anything the model left out
 
     clusters: list[dict] = []
-
-    def add(members: list[dict], verdict: dict | None):
+    for members, verdict in grouped:
         src_ids = sorted({m["source_idx"] for m in members})
         stances = (verdict or {}).get("stances", {})
         if verdict and len(src_ids) > 1:
-            status = verdict["status"]
-            text = verdict["canonical_claim"] or members[0]["text"]
-            note = verdict.get("note", "")
+            status, note = verdict["status"], verdict.get("note", "")
         else:
-            status, text, note = "single_source", max(members, key=lambda m: m.get("match", 0))["text"], ""
+            status, note = "single_source", ""
+        text = (verdict or {}).get("canonical_claim") or max(members, key=lambda m: m.get("match", 0))["text"]
         support = {m["source_idx"] for m in members if stances.get(m["id"], "supports") == "supports"}
         against = {m["source_idx"] for m in members if stances.get(m["id"]) == "contradicts"}
+        if status == "disputed" and not against and len(src_ids) > 1:
+            against = set(src_ids[1:])  # the model flagged a dispute without naming a side
+            support = {src_ids[0]}
         conf = confidence(status, [sources[i]["credibility"] for i in support or set(src_ids)],
                           [sources[i]["credibility"] for i in against])
         clusters.append({
@@ -427,83 +458,112 @@ def verify_node(state: State, config) -> dict:
                           "stance": stances.get(m["id"], "supports")} for m in members],
         })
 
-    for g in groups:
-        if len({m["source_idx"] for m in g}) == 1:
-            add(g, None)
-            continue
-        verdict = cache["|".join(sorted(m["id"] for m in g))]
-        unrelated = [m for m in g if verdict["stances"].get(m["id"]) == "unrelated"]
-        related = [m for m in g if m not in unrelated]
-        if related:
-            add(related, verdict)
-        for m in unrelated:
-            add([m], None)
-
     order = {"disputed": 0, "agreed": 1, "single_source": 2}
     clusters.sort(key=lambda c: (-len(c["source_indices"]), order[c["status"]], -c["confidence"]))
     for i, c in enumerate(clusters):
         c["key"] = f"C{i + 1}"
     counts = Counter(c["status"] for c in clusters)
+    multi = sum(1 for c in clusters if len(c["source_indices"]) > 1)
     ctx.emit("verifier", "end",
-             f"{counts['agreed']} agreed, {counts['disputed']} disputed, {counts['single_source']} single-source",
-             dict(counts))
-    return {"clusters": clusters, "vectors": vectors, "vector_method": method, "verdict_cache": cache}
+             f"{_plural(len(clusters), 'distinct fact')} ({multi} reported by 2+ sources): {counts['agreed']} agreed, "
+             f"{counts['disputed']} disputed, {counts['single_source']} single-source",
+             {**dict(counts), "method": method})
+    return {"clusters": clusters, "vectors": vectors, "vector_method": method, "verified_ids": claim_ids}
 
 
 # ---------------------------------------------------------------------------
-# 8. Gap finder + 9. Devil's advocate
+# 8. Gap finder (works on raw claims, so it needs no verification per round)
 # ---------------------------------------------------------------------------
-def research_review_node(state: State, config) -> dict:
+def gap_review_node(state: State, config) -> dict:
     ctx = _ctx(config)
     budget = _budget(state)
     rnd = state.get("round", 0)
     room = budget["max_sources"] - len(state.get("sources", []))
+    if state.get("challenge_done") or rnd >= budget["gap_rounds"] or room <= 0:
+        return {"next": "verify"}
+
+    ctx.emit("gap_finder", "start", "Checking which sub-questions still lack evidence")
+    sources = {s["idx"]: s for s in state.get("sources", [])}
+    by_sq = defaultdict(list)
+    for c in state.get("claims", []):
+        if sources[c["source_idx"]].get("duplicate_of") is None:
+            by_sq[c["sub_question"] or "(other)"].append(c["text"])
+    planned = [sq["question"] for sq in state.get("plan", [])]
+    coverage = [{"sub_question": q, "claims_found": len(by_sq[q]), "examples": by_sq[q][:4]}
+                for q in planned + [q for q in by_sq if q not in planned]]
     already = {q.lower() for q in state.get("queries_run", [])}
+    try:
+        gaps = agents.find_gaps(ctx.llm, state["standalone"], coverage)
+        queries = [{"query": q.query, "searcher": q.searcher, "sub_q": q.query, "phase": "research"}
+                   for q in gaps.queries if q.query.lower() not in already]
+    except LLMError as e:
+        ctx.warn("gap_finder", f"Gap finder unavailable ({str(e)[:80]})")
+        gaps, queries = None, []
+    if gaps and not gaps.sufficient and queries:
+        ctx.emit("gap_finder", "end", f"Searching again: {_plural(len(queries), 'follow-up query')}",
+                 {"queries": [q["query"] for q in queries], "reasons": [q.reason for q in gaps.queries]})
+        return {"queries": queries, "round": rnd + 1, "next": "search"}
+    ctx.emit("gap_finder", "end", "Coverage is sufficient")
+    return {"next": "verify"}
 
-    if rnd < budget["gap_rounds"] and room > 0:
-        ctx.emit("gap_finder", "start", "Checking which sub-questions still lack evidence")
-        claims_by_sq = defaultdict(list)
-        for c in state.get("clusters", []):
-            for sq in c["sub_questions"] or [""]:
-                claims_by_sq[sq].append(f"[{c['status']}] {c['text']}")
-        coverage = [{"sub_question": sq["question"], "verified_claims": len(claims_by_sq[sq["question"]]),
-                     "examples": claims_by_sq[sq["question"]][:4]} for sq in state.get("plan", [])]
-        try:
-            gaps = agents.find_gaps(ctx.llm, state["standalone"], coverage)
-            queries = [{"query": q.query, "searcher": q.searcher, "sub_q": q.query, "phase": "research"}
-                       for q in gaps.queries if q.query.lower() not in already]
-        except LLMError as e:
-            ctx.warn("gap_finder", f"Gap finder unavailable ({str(e)[:80]})")
-            gaps, queries = None, []
-        if gaps and not gaps.sufficient and queries:
-            ctx.emit("gap_finder", "end", f"Searching again: {_plural(len(queries), 'follow-up query')}",
-                     {"queries": [q["query"] for q in queries], "reasons": [q.reason for q in gaps.queries]})
-            return {"queries": queries, "round": rnd + 1, "next": "search"}
-        ctx.emit("gap_finder", "end", "Coverage is sufficient")
 
+def route_after_gaps(state: State) -> str:
+    return state.get("next", "verify")
+
+
+# ---------------------------------------------------------------------------
+# 9. Devil's advocate (needs verified claims, runs once in Deep mode)
+# ---------------------------------------------------------------------------
+def challenge_review_node(state: State, config) -> dict:
+    ctx = _ctx(config)
+    budget = _budget(state)
+    room = budget["max_sources"] - len(state.get("sources", []))
     if budget["challenge"] and not state.get("challenge_done") and room > 0:
         multi = [c for c in state.get("clusters", []) if c["status"] in ("agreed", "disputed")]
         targets = [f"{c['status'].upper()}: {c['text']}" for c in multi[:5]]
         if targets:
             ctx.emit("devils_advocate", "start", f"Testing {_plural(len(targets), 'key claim')} against counter-evidence")
+            already = {q.lower() for q in state.get("queries_run", [])}
             try:
                 out = agents.challenge(ctx.llm, state["standalone"], targets)
                 queries = [{"query": q.query, "searcher": q.searcher, "sub_q": "Counter-evidence", "phase": "challenge"}
                            for q in out.queries if q.query.lower() not in already]
                 if queries:
-                    return {"queries": queries, "round": rnd + 1, "challenge_done": True, "next": "search"}
+                    return {"queries": queries, "round": state.get("round", 0) + 1, "challenge_done": True,
+                            "next": "search"}
             except LLMError as e:
                 ctx.warn("devils_advocate", f"Devil's advocate unavailable ({str(e)[:80]})")
     return {"challenge_done": True, "next": "analyst"}
 
 
-def route_after_research(state: State) -> str:
+def route_after_challenge(state: State) -> str:
     return state.get("next", "analyst")
 
 
 # ---------------------------------------------------------------------------
 # 10. Quant analyst
 # ---------------------------------------------------------------------------
+def _period_key(period: str) -> str:
+    years = sorted(set(re.findall(r"(?:19|20|21)\d{2}", period or "")))
+    return ",".join(years) or (period or "").strip().lower()
+
+
+def mark_ranges(figures: list[dict]) -> int:
+    """Where sources give different values for the same measure, unit and period, attach the range.
+    Returns how many measures have such a spread. Different periods are never compared."""
+    groups = defaultdict(list)
+    for f in figures:
+        groups[(f["label"].strip().lower(), f["unit"].strip().lower(), _period_key(f["period"]))].append(f)
+    spreads = 0
+    for members in groups.values():
+        values = [f["value"] for f in members]
+        if len(values) > 1 and min(values) != max(values):
+            spreads += 1
+            for f in members:
+                f["range"] = [min(values), max(values)]
+    return spreads
+
+
 def analyst_node(state: State, config) -> dict:
     ctx = _ctx(config)
     numeric = [c for c in state.get("clusters", []) if numbers_in(c["text"])][:25]
@@ -521,14 +581,7 @@ def analyst_node(state: State, config) -> dict:
     for f in figures:
         c = by_key[f["cluster_id"]]
         f["status"], f["source_indices"] = c["status"], c["source_indices"]
-    groups = defaultdict(list)
-    for f in figures:
-        groups[(f["label"].lower(), f["unit"].lower())].append(f["value"])
-    for f in figures:
-        values = groups[(f["label"].lower(), f["unit"].lower())]
-        if len(values) > 1 and min(values) != max(values):
-            f["range"] = [min(values), max(values)]
-    spreads = sum(1 for v in groups.values() if len(v) > 1 and min(v) != max(v))
+    spreads = mark_ranges(figures)
     ctx.emit("quant_analyst", "end", f"{_plural(len(figures), 'figure')}"
              + (f"; {spreads} measured differently by different sources" if spreads else ""))
     return {"figures": figures}
@@ -670,8 +723,9 @@ def build_graph():
     g.add_node("search", search_node)
     g.add_node("read", read_node)
     g.add_node("extract", extract_node)
+    g.add_node("gap_review", gap_review_node)
     g.add_node("verify", verify_node)
-    g.add_node("research_review", research_review_node)
+    g.add_node("challenge_review", challenge_review_node)
     g.add_node("analyst", analyst_node)
     g.add_node("writer", writer_node)
     g.add_node("draft_review", draft_review_node)
@@ -682,9 +736,10 @@ def build_graph():
     g.add_edge("planner", "search")
     g.add_edge("search", "read")
     g.add_edge("read", "extract")
-    g.add_edge("extract", "verify")
-    g.add_edge("verify", "research_review")
-    g.add_conditional_edges("research_review", route_after_research, {"search": "search", "analyst": "analyst"})
+    g.add_edge("extract", "gap_review")
+    g.add_conditional_edges("gap_review", route_after_gaps, {"search": "search", "verify": "verify"})
+    g.add_edge("verify", "challenge_review")
+    g.add_conditional_edges("challenge_review", route_after_challenge, {"search": "search", "analyst": "analyst"})
     g.add_edge("analyst", "writer")
     g.add_edge("writer", "draft_review")
     g.add_conditional_edges("draft_review", route_after_draft, {"writer": "writer", "finalize": "finalize"})
