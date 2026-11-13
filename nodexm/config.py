@@ -63,9 +63,9 @@ class Settings:
 
     # LLM
     gemini_api_key: str = field(default_factory=lambda: _str("GEMINI_API_KEY") or _str("GOOGLE_API_KEY"))
-    lite_model: str = field(default_factory=lambda: _str("GEMINI_LITE_MODEL", "gemini-flash-lite-latest"))
-    flash_model: str = field(default_factory=lambda: _str("GEMINI_FLASH_MODEL", "gemini-flash-latest"))
-    fallback_models: list[str] = field(default_factory=lambda: _list("GEMINI_FALLBACK_MODELS", "gemini-3.1-flash-lite,gemini-3.8-flash"))
+    lite_model: str = field(default_factory=lambda: _str("GEMINI_LITE_MODEL", "gemini-3.5-flash-lite"))
+    flash_model: str = field(default_factory=lambda: _str("GEMINI_FLASH_MODEL", "gemini-3.6-flash"))
+    fallback_models: list[str] = field(default_factory=lambda: _list("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash,gemini-3.1-flash-lite"))
     embedding_model: str = field(default_factory=lambda: _str("GEMINI_EMBEDDING_MODEL", "models/gemini-embedding-001"))
 
     # Prices in USD per million tokens, used only for cost estimates

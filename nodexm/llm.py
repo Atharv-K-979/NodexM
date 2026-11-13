@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import warnings
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar
 
@@ -18,9 +19,16 @@ from pydantic import BaseModel
 from .config import settings
 
 log = logging.getLogger("nodexm.llm")
+# Newer Gemini models ignore temperature and warn on every call; the warning is noise here.
+warnings.filterwarnings("ignore", message=r".*uses fixed sampling defaults.*")
 
 Tier = Literal["lite", "flash"]
 T = TypeVar("T", bound=BaseModel)
+
+# Fail over quickly: an overloaded model can otherwise hang for ~2 minutes before a 504.
+REQUEST_TIMEOUT = 75
+# Model names the API answered 404 for. Shared across runs in this process.
+_MISSING: set[str] = set()
 
 
 class LLMError(RuntimeError):
@@ -115,6 +123,7 @@ class LLMClient:
         self.api_key = api_key
         self.usage = usage or Usage()
         self._models: dict[str, object] = {}
+        self._skip: set[str] = set()
         self._lock = threading.Lock()
 
     def _model(self, name: str, temperature: float):
@@ -127,8 +136,8 @@ class LLMClient:
                     model=name,
                     google_api_key=self.api_key,
                     temperature=temperature,
-                    max_retries=2,
-                    timeout=120,
+                    max_retries=1,
+                    timeout=REQUEST_TIMEOUT,
                 )
             return self._models[key]
 
@@ -136,16 +145,35 @@ class LLMClient:
     def _chain(tier: Tier) -> list[str]:
         first = settings.lite_model if tier == "lite" else settings.flash_model
         fallbacks = list(settings.fallback_models)
-        if tier == "flash":  # prefer full Flash models before Lite ones
-            fallbacks.sort(key=lambda n: "lite" in n)
+        # Flash work prefers full Flash fallbacks; Lite work prefers cheaper Lite fallbacks.
+        fallbacks.sort(key=lambda n: ("lite" in n) if tier == "flash" else ("lite" not in n))
         names = [first] + fallbacks
         return list(dict.fromkeys(n for n in names if n))
+
+    def _candidates(self, tier: Tier) -> list[str]:
+        """Models to try, skipping ones that do not exist for this key or already failed in this run."""
+        chain = self._chain(tier)
+        with self._lock:
+            usable = [n for n in chain if n not in _MISSING and n not in self._skip]
+        return usable or [n for n in chain if n not in _MISSING] or chain
+
+    def _failed(self, name: str, agent: str, kind: str, e: Exception) -> str:
+        msg = str(e)
+        if "NOT_FOUND" in msg or "404" in msg[:40]:
+            with self._lock:
+                _MISSING.add(name)  # wrong model name: never try it again in this process
+            log.error("model %s does not exist for this API key; check GEMINI_*_MODEL in .env", name)
+        else:
+            with self._lock:
+                self._skip.add(name)  # overloaded, timed out or unparseable: skip it for the rest of this run
+            log.warning("%s call failed on %s (%s): %s", kind, name, agent, msg[:300])
+        return f"{name}: {msg[:200]}"
 
     def structured(self, tier: Tier, schema: type[T], system: str, user: str, *, agent: str = "",
                    temperature: float = 0.2) -> T:
         messages = [SystemMessage(content=system), HumanMessage(content=user)]
         errors = []
-        for name in self._chain(tier):
+        for name in self._candidates(tier):
             try:
                 runnable = self._model(name, temperature).with_structured_output(schema, include_raw=True)
                 out = runnable.invoke(messages)
@@ -159,14 +187,13 @@ class LLMClient:
                     parsed = schema.model_validate(parsed)
                 return parsed
             except Exception as e:  # try the next model
-                log.warning("structured call failed on %s (%s): %s", name, agent, e)
-                errors.append(f"{name}: {str(e)[:200]}")
+                errors.append(self._failed(name, agent, "structured", e))
         raise LLMError("; ".join(errors) or "no models configured")
 
     def text(self, tier: Tier, system: str, user: str, *, agent: str = "", temperature: float = 0.3) -> str:
         messages = [SystemMessage(content=system), HumanMessage(content=user)]
         errors = []
-        for name in self._chain(tier):
+        for name in self._candidates(tier):
             try:
                 msg = self._model(name, temperature).invoke(messages)
                 self.usage.add_llm(tier, agent, *_tokens(msg))
@@ -175,8 +202,7 @@ class LLMClient:
                     raise LLMError("empty response")
                 return text
             except Exception as e:
-                log.warning("text call failed on %s (%s): %s", name, agent, e)
-                errors.append(f"{name}: {str(e)[:200]}")
+                errors.append(self._failed(name, agent, "text", e))
         raise LLMError("; ".join(errors) or "no models configured")
 
     def embed(self, texts: list[str]) -> list[list[float]] | None:

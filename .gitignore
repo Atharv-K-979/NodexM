@@ -220,6 +220,8 @@ __marimo__/
 # NodexM local data
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 .nodexm_secret
 frontend/node_modules/
 frontend/dist/
