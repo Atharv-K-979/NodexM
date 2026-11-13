@@ -22,7 +22,7 @@ from .llm import Usage
 log = logging.getLogger("nodexm.search")
 
 SEARCHERS = ("web", "academic", "regulatory", "news", "data")
-TIMEOUT = httpx.Timeout(12.0, connect=6.0)
+TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 UA = "NodexMBot/3.0 (+research assistant)"
 
 REGULATORY_DOMAINS = {
@@ -41,6 +41,25 @@ STOPWORDS = set(
 )
 
 
+def iso_date(value) -> str | None:
+    """Normalise the many date formats APIs return ('Mon, 05 Jan 2026 10:00:00 GMT', '2025-02-01T..', '2024')
+    to 'YYYY-MM-DD' (or 'YYYY' when only the year is known)."""
+    if not value:
+        return None
+    text = str(value).strip()
+    m = re.match(r"(\d{4}-\d{2}-\d{2})", text)
+    if m:
+        return m.group(1)
+    try:
+        from email.utils import parsedate_to_datetime
+
+        return parsedate_to_datetime(text).date().isoformat()
+    except (TypeError, ValueError, IndexError):
+        pass
+    m = re.search(r"\b(19|20)\d{2}\b", text)
+    return m.group(0) if m else None
+
+
 @dataclass
 class Hit:
     url: str
@@ -52,6 +71,9 @@ class Hit:
     published: str | None = None
     query: str = ""
     extra: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        self.published = iso_date(self.published)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -93,14 +115,17 @@ def _tavily(query: str, ctx: SearchContext, *, topic: str = "general", include_d
         return []
     from tavily import TavilyClient
 
-    kwargs = dict(query=query[:380], max_results=max_results, topic=topic, search_depth="basic")
+    # include_raw_content returns each page's full text at no extra credit, so most pages need no fetch.
+    kwargs = dict(query=query[:380], max_results=max_results, topic=topic, search_depth="basic",
+                  include_raw_content="text")
     if include_domains:
         kwargs["include_domains"] = include_domains[:20]
     res = TavilyClient(api_key=ctx.tavily_key).search(**kwargs)
     ctx.usage.add_search(1)
     return [
         Hit(url=r.get("url", ""), title=r.get("title") or r.get("url", ""), snippet=(r.get("content") or "")[:600],
-            source_type=source_type, searcher=searcher, published=r.get("published_date"), query=query)
+            text=(r.get("raw_content") or "")[:20_000], source_type=source_type, searcher=searcher,
+            published=r.get("published_date"), query=query)
         for r in res.get("results", []) if r.get("url")
     ]
 
