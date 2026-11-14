@@ -151,7 +151,7 @@ def update_ledger(session: Session, watch: Watch, run: Run, claims: list[Claim],
             c.ledger_claim_id = lc.id
             if not baseline:
                 if strong:
-                    n = (c.independence or {}).get("independent", 2)
+                    n = (c.independence or {}).get("supporting", (c.independence or {}).get("independent", 2))
                     event(lc, "new", c.status, c.text, "strong",
                           f"Backed by {n} independent sources the first time it was seen.", None, after)
                 else:

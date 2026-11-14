@@ -90,6 +90,8 @@ def run_detail(session: Session, run: Run) -> dict:
             "independence": {
                 "independent": (c.independence or {}).get("independent", len(c.source_indices)),
                 "sites": (c.independence or {}).get("sites", len(c.source_indices)),
+                "supporting": (c.independence or {}).get("supporting",
+                                                         (c.independence or {}).get("independent", len(c.source_indices))),
                 "groups": [[i + 1 for i in g] for g in (c.independence or {}).get("groups", [])],
                 "reasons": (c.independence or {}).get("reasons", []),
             },

@@ -475,7 +475,8 @@ def verify_node(state: State, config) -> dict:
                           best(against_groups))
         clusters.append({
             "text": text, "status": status, "confidence": conf, "note": note, "source_indices": src_ids,
-            "independence": {"independent": len(support_groups) or 1, "sites": len(src_ids),
+            # independent: original sources behind all the evidence; supporting: those backing the claim
+            "independence": {"independent": len(groups), "supporting": len(support_groups) or 1, "sites": len(src_ids),
                              "groups": [sorted(g) for g in groups], "reasons": reasons},
             "sub_questions": sorted({m["sub_question"] for m in members if m["sub_question"]}),
             "embedding": centroid([vectors[m["id"]] for m in members]),
