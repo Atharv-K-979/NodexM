@@ -40,9 +40,31 @@ Run the tests (offline; they use a scripted LLM): `pytest`
 | `TAVILY_API_KEY` | Recommended | 1,000 searches a month | General web search |
 | `JINA_API_KEY` | Optional | Free key | Faster page reading |
 | `RESEND_API_KEY` | Optional | 3,000 emails a month | Watch change alerts |
+| `GOOGLE_CLIENT_ID` | Optional | Free | "Continue with Google" sign-in |
 | `S2_API_KEY`, `FRED_API_KEY` | Optional | Free | More academic and economic data |
 
 OpenAlex, arXiv, the Federal Register and GDELT need no key. See `.env.example` for every setting.
+
+## Google sign-in (optional, free)
+
+"Continue with Google" uses Google Identity Services. It is free at any number of users and needs only a
+Client ID, no client secret and no billing account.
+
+1. Open https://console.cloud.google.com and create a project (or pick an existing one).
+2. Go to **Google Auth Platform** (also listed as **APIs & Services → OAuth consent screen**) and set it up:
+   app name, your support email, audience **External**. Only the basic `email`, `profile` and `openid`
+   scopes are used, so no verification review is needed.
+3. Under **Audience**, either add yourself and your testers as **Test users**, or click **Publish app** so
+   anyone with a Google account can sign in.
+4. Go to **Clients** (or **Credentials → Create credentials → OAuth client ID**), choose **Web application**,
+   and add these **Authorized JavaScript origins**:
+   `http://localhost:5173`, `http://localhost:8000` and `http://localhost`
+   (plus your real domain when you deploy). No redirect URI is needed.
+5. Copy the Client ID (it ends in `.apps.googleusercontent.com`) into `.env` as `GOOGLE_CLIENT_ID=` and
+   restart the server.
+
+If someone already has a NodexM account with the same email, signing in with Google links the two, so both
+methods work. Accounts created with Google have no password.
 
 ## How a question is answered
 
