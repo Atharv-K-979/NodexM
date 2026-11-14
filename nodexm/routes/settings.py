@@ -46,6 +46,7 @@ def public_config() -> dict:
         "server_llm": bool(settings.gemini_api_key),
         "web_search": search_available(settings.tavily_api_key),
         "email_alerts": email_enabled(),
+        "google_client_id": settings.google_client_id or None,
     }
 
 

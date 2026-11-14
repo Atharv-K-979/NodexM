@@ -60,6 +60,8 @@ class Settings:
     jwt_ttl_hours: int = field(default_factory=lambda: _int("JWT_TTL_HOURS", 72))
     cors_origins: list[str] = field(default_factory=lambda: _list("CORS_ORIGINS", "http://localhost:5173"))
     admin_emails: list[str] = field(default_factory=lambda: [e.lower() for e in _list("ADMIN_EMAILS")])
+    # "Sign in with Google" (free). Only the OAuth Client ID is needed, no secret.
+    google_client_id: str = field(default_factory=lambda: _str("GOOGLE_CLIENT_ID"))
 
     # LLM
     gemini_api_key: str = field(default_factory=lambda: _str("GEMINI_API_KEY") or _str("GOOGLE_API_KEY"))

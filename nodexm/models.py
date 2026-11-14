@@ -43,7 +43,9 @@ class User(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     email: str = Field(unique=True, index=True, max_length=255)
     name: str = Field(default="", max_length=120)
-    password_hash: str = Field(max_length=255)
+    password_hash: str = Field(default="", max_length=255)  # empty for Google-only accounts
+    google_sub: Optional[str] = Field(default=None, unique=True, index=True, max_length=255)
+    avatar_url: Optional[str] = Field(default=None, max_length=1024)
     preferences: dict = _json()
     gemini_key_enc: Optional[str] = Field(default=None, max_length=1024)
     tavily_key_enc: Optional[str] = Field(default=None, max_length=1024)

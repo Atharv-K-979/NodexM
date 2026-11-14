@@ -19,6 +19,8 @@ def user_out(user: User) -> dict:
         "email": user.email,
         "name": user.name or user.email.split("@")[0],
         "preferences": prefs,
+        "avatar_url": user.avatar_url,
+        "sign_in": {"password": bool(user.password_hash), "google": bool(user.google_sub)},
         "keys": {"gemini": mask(decrypt(user.gemini_key_enc)), "tavily": mask(decrypt(user.tavily_key_enc))},
         "created_at": iso(user.created_at),
     }
