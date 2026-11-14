@@ -1,179 +1,250 @@
 # NodexM
 
-Multi-agent research where every claim is checked.
+**Research answers where every claim is checked, and alerts when a fact changes.**
 
-NodexM answers research questions the way an analyst would. A team of agents plans the question, searches
-official, academic, news and data sources, reads them in full, and checks every factual claim against the
-other sources. Each claim is labelled **agreed**, **disputed** or **single source** with a confidence score,
-and every citation opens the exact sentence it came from. **Watches** re-run a topic on a schedule and tell
-you when a fact changes instead of sending a whole new report.
+![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
+![React](https://img.shields.io/badge/react-18-61DAFB?logo=react&logoColor=black)
+![FastAPI](https://img.shields.io/badge/FastAPI-backend-009688?logo=fastapi&logoColor=white)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
-## Quick start
+NodexM is an open-source research assistant built from a team of AI agents. You ask a question; it plans
+the research, searches the web, academic papers, regulators, news and official statistics in parallel,
+reads every source in full, and checks each factual claim against the others before it writes anything.
 
-Requirements: Python 3.11+ and Node 18+.
+Every claim comes back labelled:
 
-```bash
-# 1. Backend
-python -m venv .venv
-source .venv/bin/activate            # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env                 # then add GEMINI_API_KEY (and ideally TAVILY_API_KEY)
-uvicorn main:app --reload            # http://localhost:8000, API docs at /docs
+| Label | Meaning |
+|---|---|
+| **Agreed** | At least two *independent* original sources state it |
+| **Disputed** | Credible sources give conflicting figures, dates or conclusions — both sides are shown |
+| **Single source** | Only one original source states it, even if several sites repeat it |
 
-# 2. Frontend (second terminal)
-cd frontend
-npm install
-npm run dev                          # http://localhost:5173
-```
+Each citation opens the exact sentence it came from. And with **Watches**, NodexM re-runs a topic on a
+schedule and tells you only what changed: a fact that became disputed, a new fact, or one that disappeared.
 
-Create an account in the app and ask a question. To run everything from one process, build the frontend
-(`cd frontend && npm run build`); `uvicorn main:app` then serves it at http://localhost:8000.
+---
 
-Run the tests (offline; they use a scripted LLM): `pytest`
+## Why NodexM exists
 
-## What you need
+AI search tools are fluent but often wrong about where their facts come from. Independent audits have found
+AI search engines giving incorrect answers to more than 60% of news-citation queries
+([Tow Center, 2025](https://www.cjr.org/tow_center/we-compared-eight-ai-search-engines-theyre-all-bad-at-citing-news.php)),
+and significant problems — most often with sourcing — in 45% of AI assistants' news answers
+([EBU/BBC, 2025](https://www.npr.org/sections/npr-extra/2025/10/21/g-s1-94424/global-study-on-news-integrity-in-ai-assistants-shows-need-for-safeguards-and-improved-accuracy)).
 
-| Key | Needed? | Free allowance | Used for |
-|---|---|---|---|
-| `GEMINI_API_KEY` | Required | Free tier with daily limits | All agents and claim embeddings |
-| `NODEXM_JWT_SECRET` | Required in production | You generate it | Signing login tokens |
-| `TAVILY_API_KEY` | Recommended | 1,000 searches a month | General web search |
-| `JINA_API_KEY` | Optional | Free key | Faster page reading |
-| `RESEND_API_KEY` | Optional | 3,000 emails a month | Watch change alerts |
-| `GOOGLE_CLIENT_ID` | Optional | Free | "Continue with Google" sign-in |
-| `S2_API_KEY`, `FRED_API_KEY` | Optional | Free | More academic and economic data |
+Most tools show a list of links and leave the checking to you. NodexM does the checking, shows its work,
+and keeps watching.
 
-OpenAlex, arXiv, the Federal Register and GDELT need no key. See `.env.example` for every setting.
+## What makes it different
 
-## Google sign-in (optional, free)
+- **Counts independent sources, not sites.** Ten websites republishing one Reuters story count as *one*
+  source. Wire datelines, word-for-word repeats, sources that cite each other, and sources crediting the
+  same organisation are all grouped, so "agreed" really means independently confirmed.
+- **Evidence you can click.** A claim is only kept if its quote is found word for word in the source.
+  Click any citation to see that sentence highlighted in context, with the source's credibility score.
+- **Looks for counter-evidence.** In Deep mode a devil's-advocate agent searches specifically for sources
+  that contradict the findings, or that settle a dispute.
+- **Checks its own citations.** A citation auditor tests every cited sentence — including every number —
+  against the source it cites, and sends weak answers back for revision.
+- **Watches that alert on confirmed changes.** A claim ledger remembers every fact a Watch has found.
+  Alerts fire only when a change is confirmed by a new independent source or seen on two runs in a row,
+  and each alert shows the quotes before and after.
+- **Transparent and predictable.** Every step of the research is visible live, and every run reports its
+  model calls, searches and estimated cost (typically about $0.03 for a Quick run and $0.14 for a Deep run).
 
-"Continue with Google" uses Google Identity Services. It is free at any number of users and needs only a
-Client ID, no client secret and no billing account.
+## Features
 
-1. Open https://console.cloud.google.com and create a project (or pick an existing one).
-2. Go to **Google Auth Platform** (also listed as **APIs & Services → OAuth consent screen**) and set it up:
-   app name, your support email, audience **External**. Only the basic `email`, `profile` and `openid`
-   scopes are used, so no verification review is needed.
-3. Under **Audience**, either add yourself and your testers as **Test users**, or click **Publish app** so
-   anyone with a Google account can sign in.
-4. Go to **Clients** (or **Credentials → Create credentials → OAuth client ID**), choose **Web application**,
-   and add these **Authorized JavaScript origins**:
-   `http://localhost:5173`, `http://localhost:8000` and `http://localhost`
-   (plus your real domain when you deploy). No redirect URI is needed.
-5. Copy the Client ID (it ends in `.apps.googleusercontent.com`) into `.env` as `GOOGLE_CLIENT_ID=` and
-   restart the server.
+**Research**
+- Auto, **Quick** (about 8 sources, ~1 minute) and **Deep** (up to 24 sources, extra research rounds and a
+  counter-evidence round, ~3–4 minutes) modes
+- Specialist searchers: general web, academic (OpenAlex, arXiv, Semantic Scholar), regulatory (official
+  domains by region, US Federal Register), news (incl. GDELT) and data (FRED, statistics agencies)
+- Full-text reading of web pages and PDFs, with a 24-hour cache
+- Region focus (Global, EU, US, UK, APAC) and writing depth (brief, analyst, technical)
+- Threads with follow-up questions that understand the earlier answers
 
-If someone already has a NodexM account with the same email, signing in with Google links the two, so both
-methods work. Accounts created with Google have no password.
+**Answers**
+- A **Facts** view that leads with disputes (both sides' quotes side by side), then facts confirmed by
+  independent sources, then facts resting on one original source
+- A written answer where every factual sentence is cited, and disagreements are shown, never averaged
+- Sources with type, date, credibility score and reasons, and which wire story a page republishes
+- A key-figures table that lines up numbers by unit and period
+- Edit, rewrite one section with an instruction, approve, and export to Markdown or HTML
+
+**Watches**
+- Daily, weekday, weekly, twice-monthly or monthly schedules
+- A "what changed" feed: status changes, new facts, facts that are no longer found
+- Before/after quotes and the reason each alert was confirmed
+- *Real change* / *Noise* feedback on each alert, giving an alert-precision score per Watch
+- Optional email alerts
+
+**Accounts**
+- Email and password sign-in with JWT
+- Free runs per account (2 Quick + 1 Deep by default), a daily spending cap, and the option for users to
+  add their own API keys (stored encrypted)
 
 ## How a question is answered
 
 ```
-router → planner → specialist searchers → reader → credibility → extractor → clusterer → verifier
-                         ↑                                                                  │
-                         └──── gap finder (≤2 rounds) · devil's advocate (1 round) ◄────────┘
-→ quant analyst → writer ⇄ critic + citation auditor (≤2 revisions) → finalize → change detector (Watches)
+router → planner → specialist searchers → reader → credibility → extractor
+                          ↑                                          │
+                          └──── gap finder (Deep: up to 2 rounds) ◄──┘
+→ verifier → devil's advocate (Deep: 1 round, then verify again)
+→ quant analyst → writer ⇄ critic + citation auditor (up to 2 revisions) → answer
+→ change detector (Watches only)
 ```
 
-| Agent | What it does | How |
+| Agent | What it does |
+|---|---|
+| Router | Picks Quick or Deep and turns follow-ups into complete questions |
+| Planner | Splits the question into sub-questions and chooses which searchers to use |
+| Specialist searchers | Search the web, academic papers, regulators, news and data sources in parallel |
+| Reader | Reads full pages and PDFs, respecting robots.txt |
+| Credibility scorer | Scores each source with reasons and flags copies and wire stories |
+| Extractor | Pulls out claims, each with an exact quote that must exist in the source |
+| Verifier | Groups claims by fact, decides agreed or disputed, and counts independent sources |
+| Gap finder | Searches again where the evidence is thin |
+| Devil's advocate | Searches for counter-evidence and for sources that settle disputes |
+| Quant analyst | Normalises figures and flags where sources measure differently |
+| Writer | Writes only from verified claims and cites every fact |
+| Critic | Scores accuracy, completeness and clarity |
+| Citation auditor | Checks every cited sentence and number against its source |
+| Change detector | Compares a Watch run with the claim ledger and records confirmed changes |
+
+Rule-based agents (credibility, citation audit, change detection, independence checks) run as plain code,
+which keeps them fast, cheap and repeatable.
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.11 or newer
+- Node.js 18 or newer
+- A [Google Gemini API key](https://aistudio.google.com/apikey) (free tier available)
+- Recommended: a [Tavily API key](https://app.tavily.com) for web search (1,000 free searches a month)
+
+### Install and run
+
+```bash
+git clone https://github.com/Atharv-K-979/NodexM.git
+cd NodexM
+
+# Backend
+python -m venv .venv
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env                   # then fill in your keys (see below)
+uvicorn main:app --reload              # API on http://localhost:8000, docs at /docs
+
+# Frontend, in a second terminal
+cd frontend
+npm install
+npm run dev                            # open http://localhost:5173
+```
+
+Create an account in the app and ask a question.
+
+To serve everything from one process, build the frontend once (`cd frontend && npm run build`); the API
+then serves the app at http://localhost:8000.
+
+### Configuration
+
+All settings live in `.env`; `.env.example` lists every option with comments. The main ones:
+
+| Setting | Needed? | What it does |
 |---|---|---|
-| Router | Picks Quick or Deep, rewrites follow-ups as standalone questions | Lite model |
-| Planner | Splits the question into sub-questions and assigns searchers | Lite model |
-| Specialist searchers | Web, academic, regulatory, news and data search in parallel | Tavily/SearXNG, OpenAlex, arXiv, Semantic Scholar, Federal Register, official domains, GDELT, FRED |
-| Reader | Reads full pages and PDFs, respects robots.txt | Jina Reader or trafilatura + pypdf |
-| Credibility scorer | Scores each source, sets aside copies of other pages and tags pages that republish a wire story | Rules (code) |
-| Extractor | Pulls claims with an exact quote; quotes not found in the page are dropped | Lite model + quote locator |
-| Claim clusterer | Groups claims that state the same fact | Embeddings, or word vectors as fallback |
-| Verifier | Groups claims by fact, labels each agreed or disputed, then counts independent sources (agreed needs two) | Flash model + rules |
-| Gap finder | Searches again where evidence is thin | Lite model |
-| Devil's advocate | Looks for counter-evidence and for sources that settle disputes | Lite model |
-| Quant analyst | Normalises figures and flags where sources measure differently | Flash model |
-| Writer | Writes only from verified claims, cites every fact, shows both sides of disputes | Flash model (Lite in Quick mode) |
-| Critic | Scores accuracy, completeness and clarity | Lite model |
-| Citation auditor | Checks each cited sentence against the source it cites | Code |
-| Change detector | Compares a Watch run with the claim ledger and alerts only on confirmed changes | Code |
+| `GEMINI_API_KEY` | Required | Powers every AI agent and claim matching |
+| `NODEXM_JWT_SECRET` | Required in production | Signs login tokens (`python -c "import secrets; print(secrets.token_hex(32))"`) |
+| `TAVILY_API_KEY` | Recommended | General web, news and regulator search |
+| `ADMIN_EMAILS` | Optional | Accounts with unlimited runs (for example, your own) |
+| `DATABASE_URL` | Optional | SQLite file by default; Postgres is supported |
+| `JINA_API_KEY` | Optional | More reliable page reading |
+| `RESEND_API_KEY` | Optional | Email alerts for Watches |
+| `S2_API_KEY`, `FRED_API_KEY` | Optional | Extra academic and economic data |
+| `FREE_QUICK_RUNS`, `FREE_DEEP_RUNS`, `DAILY_BUDGET_USD` | Optional | Free-run limits and the daily spending cap |
 
-Quick mode reads about 8 sources in one pass. Deep mode reads up to 24, with gap-filling and a
-counter-evidence round. Both have hard limits on searches, sources and revisions, so cost stays predictable.
+OpenAlex, arXiv, the US Federal Register and GDELT need no key. Gemini model names can be changed with
+`GEMINI_LITE_MODEL`, `GEMINI_FLASH_MODEL` and `GEMINI_FALLBACK_MODELS`.
 
-## Independent sources, not sites
+### Run the tests
 
-A claim only counts as **agreed** when at least two *independent* original sources back it. Sources are
-grouped as one original when:
+```bash
+pytest
+```
 
-- they republish the same wire story (datelines such as "LONDON (Reuters) -", "(AP)", "(PTI)", or
-  "according to Bloomberg", and press-release wires);
-- they quote the claim in near-identical words, or one page mostly contains another;
-- one source attributes the claim to another source in the list ("the IEA estimates…" while iea.org is cited);
-- they credit the same organisation, even if it is not in the list ("according to the Office for National
-  Statistics" and "figures from the ONS").
-
-Each claim shows how many sites reported it and how many independent sources that really is, for example
-"3 sites → 1 independent source (Reuters)". Answers open on a **Facts** tab that leads with disputes, then
-facts confirmed by independent sources, then facts resting on one original source.
-
-## Watches: confirmed changes only
-
-AI research results vary between identical runs, so a Watch only alerts when a change is **confirmed**:
-either a new independent source backs it, or it shows up on two runs in a row. Until then it waits as a
-pending change. A new fact with one source is a candidate until it is seen again; a fact is only stale
-after three missed runs. Every alert keeps the quotes before and after, and says why it was confirmed.
-Mark alerts as **Real change** or **Noise** to measure alert precision for each Watch.
+The tests run offline with a scripted model and stubbed sources, so they need no API keys.
 
 ## Benchmarks
 
+NodexM ships tools to measure itself, rather than asking you to take its accuracy on trust.
+
 ```bash
-python -m bench.eval_syndication             # offline, free: scores source-independence detection
-python -m bench.run_benchmark --limit 3      # live, uses your keys: copy inflation, citation support, cost
-python -m bench.run_benchmark --mode deep    # all 12 questions in Deep mode (about $1.70)
+python -m bench.eval_syndication           # offline: how well it groups copies of the same source
+python -m bench.run_benchmark --limit 3    # live, uses your keys: copy inflation, citation support, cost
 ```
 
-`bench/syndication_cases.json` is a small hand-labeled test set, including cases the method is known to
-miss; the live runner uses `bench/questions.json`. Reports are written to `docx/benchmark/` (local only).
-The labeled set is in-sample, so treat its scores as a sanity check until real-world cases are labeled by
-someone else. Free-tier Gemini keys can hit daily limits on longer runs.
+- `bench/syndication_cases.json` — a small hand-labeled set of sources behind one claim, with the true
+  independent groups, including cases the current method is known to miss.
+- `bench/questions.json` — questions about widely reported facts, used to measure how often counting
+  sites would overstate agreement.
 
-## Free runs and costs
+The labeled set is small and was written by the same author as the method, so treat its scores as a sanity
+check. Contributions of real-world labeled cases are very welcome.
 
-Each account gets `FREE_QUICK_RUNS` + `FREE_DEEP_RUNS` runs on the server's keys (2 + 1 by default). Failed
-or stopped runs don't count. Users can add their own Gemini key in Settings to keep going at no cost to you.
-`DAILY_BUDGET_USD` pauses free runs if the day's estimated spend reaches the limit. Every run records its
-tokens, searches and estimated cost (see the Steps tab).
-
-## Project layout
+## Project structure
 
 ```
 main.py                  entry point (uvicorn main:app)
 nodexm/
   config.py              settings from .env
-  models.py, db.py       database tables (SQLite by default, Postgres supported)
-  auth.py, crypto.py     JWT auth, encryption of users' own keys
-  llm.py                 Gemini client: model tiers, fallbacks, structured output, cost tracking
-  agents.py              LLM agents and their prompts
-  search.py, reader.py   specialist searchers and full-text reader (24h cache in cache.py)
-  credibility.py         source scoring
-  evidence.py            quote locating, duplicates, source independence, clustering, confidence, citation audit
-  pipeline.py            the LangGraph research graph
+  models.py, db.py       database tables and migrations
+  auth.py, crypto.py     JWT auth and encryption of users' own keys
+  llm.py                 model tiers, fallbacks, structured output and cost tracking
+  agents.py              the language-model agents and their prompts
+  search.py, reader.py   specialist searchers and the full-text reader
+  credibility.py         source credibility scoring
+  evidence.py            quote locating, copies, source independence, clustering, citation audit
+  pipeline.py            the research graph (LangGraph)
   ledger.py              Watch claim ledger and change detection
-  jobs.py                run queue, worker threads, Watch scheduler, live events
-  quota.py               free-run allowance and daily budget
-  routes/                REST API: auth, settings, threads, runs (incl. SSE), watches
-frontend/                React + Vite + Tailwind app
-bench/                   source-independence test set and the live copy-inflation benchmark
-tests/                   offline tests for the evidence engine, pipeline, ledger, jobs and API
+  jobs.py                run queue, worker threads, scheduler and live events
+  quota.py               free runs and the daily budget
+  routes/                REST API
+frontend/                React, Vite and Tailwind web app
+bench/                   independence test set and the live benchmark
+tests/                   offline test suite
 ```
 
 ## API overview
 
-All endpoints except register, login, health and config need `Authorization: Bearer <token>`.
+The REST API is documented interactively at `/docs` when the server runs. All endpoints except register,
+login, health and config need an `Authorization: Bearer <token>` header.
 
-| Method and path | Purpose |
+| Endpoint | Purpose |
 |---|---|
 | `POST /api/auth/register`, `POST /api/auth/login`, `GET /api/auth/me` | Accounts |
 | `GET /api/threads`, `POST /api/threads` | List threads, ask a new question |
 | `GET/PATCH/DELETE /api/threads/{id}`, `POST /api/threads/{id}/runs` | Open, rename, delete, follow up |
-| `GET /api/runs/{id}`, `GET /api/runs/{id}/events` | Full answer, live trace (server-sent events) |
-| `PATCH /api/runs/{id}/draft`, `POST .../rewrite-section`, `POST .../approve`, `GET .../export` | Review |
+| `GET /api/runs/{id}`, `GET /api/runs/{id}/events` | Full answer, live progress (server-sent events) |
+| `PATCH /api/runs/{id}/draft`, `POST .../rewrite-section`, `POST .../approve`, `GET .../export` | Review and export |
 | `GET/POST /api/watches`, `GET/PATCH/DELETE /api/watches/{id}`, `POST /api/watches/{id}/run` | Watches |
-| `GET /api/watches/changes`, `POST /api/watches/{id}/changes/{change_id}/feedback` | Recent changes, real/noise verdicts |
-| `GET/PUT /api/settings`, `PUT /api/settings/keys`, `GET /api/usage` | Settings and usage |
+| `GET /api/watches/changes`, `POST /api/watches/{id}/changes/{change_id}/feedback` | Recent changes and alert feedback |
+| `GET/PUT /api/settings`, `PUT /api/settings/keys`, `GET /api/usage` | Settings, own keys and usage |
+
+## Roadmap
+
+- Slack and Microsoft Teams delivery for Watch alerts
+- An exportable audit pack: claims, quotes, source snapshots and status history in one file
+- A draft checker: upload a report and verify every citation in it
+- Curated source packs for regulatory, health and competitive-intelligence research
+- A larger public benchmark with independently labeled cases
+- Shared team ledgers, and an API for verifying claims from other tools
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `pytest` before submitting, and include a test with any
+change to the verification logic. Labeled real-world examples of syndicated or independent sources are
+especially useful for improving the benchmark.
+
+## License
+
+[MIT](LICENSE) © 2026 Atharv Kulkarni
