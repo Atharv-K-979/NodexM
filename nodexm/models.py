@@ -115,6 +115,7 @@ class Source(SQLModel, table=True):
     credibility: float = Field(default=0.5)
     credibility_reasons: list = _json(list)
     duplicate_of: Optional[int] = None
+    origin: Optional[str] = Field(default=None, max_length=64)  # news wire this page republishes
     snippet: str = _text()
     text: str = _text()
     sub_question: str = Field(default="", max_length=1000)
@@ -132,6 +133,8 @@ class Claim(SQLModel, table=True):
     confidence: float = Field(default=0.0)
     note: str = _text()
     source_indices: list = _json(list)
+    # {"independent": n, "sites": m, "groups": [[idx, ...], ...], "reasons": [...]}
+    independence: Optional[dict] = Field(default=None, sa_column=Column(JSON, nullable=True))
     embedding: Optional[list] = Field(default=None, sa_column=Column(JSON, nullable=True))
     ledger_claim_id: Optional[int] = Field(default=None, foreign_key="ledger_claims.id")
 

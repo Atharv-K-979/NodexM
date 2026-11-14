@@ -81,11 +81,18 @@ def run_detail(session: Session, run: Run) -> dict:
             "searcher": s.searcher, "published": s.published_at, "credibility": s.credibility,
             "credibility_reasons": s.credibility_reasons, "snippet": s.snippet[:400],
             "duplicate_of": (s.duplicate_of + 1) if s.duplicate_of is not None else None,
+            "origin": s.origin,
             "evidence_count": quotes_by_source.get(s.idx, 0),
         } for s in sources],
         "claims": [{
             "id": c.id, "key": c.key, "text": c.text, "status": c.status, "confidence": c.confidence,
             "note": c.note, "sources": [i + 1 for i in c.source_indices], "evidence": ev_by_claim.get(c.id, []),
+            "independence": {
+                "independent": (c.independence or {}).get("independent", len(c.source_indices)),
+                "sites": (c.independence or {}).get("sites", len(c.source_indices)),
+                "groups": [[i + 1 for i in g] for g in (c.independence or {}).get("groups", [])],
+                "reasons": (c.independence or {}).get("reasons", []),
+            },
         } for c in claims],
         "draft": {
             "content_md": draft.content_md, "version": draft.version, "status": draft.status,

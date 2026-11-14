@@ -143,12 +143,14 @@ def _persist_result(session: Session, run: Run, result: dict) -> list[Claim]:
                            source_type=s["source_type"], searcher=s["searcher"],
                            published_at=(str(s.get("published"))[:32] if s.get("published") else None),
                            credibility=s["credibility"], credibility_reasons=s["credibility_reasons"],
-                           duplicate_of=s.get("duplicate_of"), snippet=s.get("snippet", "")[:2000], text=s["text"],
+                           duplicate_of=s.get("duplicate_of"), origin=s.get("origin"),
+                           snippet=s.get("snippet", "")[:2000], text=s["text"],
                            sub_question=(s.get("sub_question") or "")[:1000]))
     claims = []
     for c in result["clusters"]:
         row = Claim(run_id=run.id, key=c["key"], text=c["text"], status=c["status"], confidence=c["confidence"],
-                    note=c.get("note", ""), source_indices=c["source_indices"], embedding=c.get("embedding"))
+                    note=c.get("note", ""), source_indices=c["source_indices"], embedding=c.get("embedding"),
+                    independence=c.get("independence"))
         session.add(row)
         session.flush()
         for e in c["evidence"]:

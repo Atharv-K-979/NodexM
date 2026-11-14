@@ -13,7 +13,7 @@ from nodexm.search import Hit
 
 GOV = ("SMEs pay compliance costs of 6,000 euros per high-risk system per year under the AI Act. "
        "The regulation entered into force in August 2024 after adoption by the Parliament. ") * 3
-NEWS = ("Reporting confirms SMEs pay compliance costs of 6,000 euros per high-risk system per year under the AI Act. "
+NEWS = ("Small firms will spend roughly 6,000 euros a year on each high-risk AI system to meet the new EU rules, an analysis of filings shows. "
         "Industry groups lobbied for simpler rules for small companies across the union. ") * 3
 BLOG = ("Our analysis says SMEs pay compliance costs of 12,000 euros per high-risk system per year under the AI Act. "
         "Consultants expect demand for audits to grow quickly over the next two years. ") * 3

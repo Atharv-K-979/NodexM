@@ -30,6 +30,8 @@ _ADDED_COLUMNS = {
         ("google_sub", "VARCHAR(255)", "CREATE UNIQUE INDEX IF NOT EXISTS ix_users_google_sub ON users (google_sub)"),
         ("avatar_url", "VARCHAR(1024)", None),
     ],
+    "sources": [("origin", "VARCHAR(64)", None)],
+    "claims": [("independence", "JSON", None)],
 }
 
 

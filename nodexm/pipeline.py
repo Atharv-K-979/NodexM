@@ -31,11 +31,13 @@ from .evidence import (
     confidence,
     find_duplicates,
     group_claims,
+    independence_groups,
     lexical_vectors,
     locate_quote,
     numbers_in,
     pack_batches,
     parse_citation,
+    source_origin,
     tokens,
 )
 from .llm import LLMClient, LLMError
@@ -264,6 +266,7 @@ def read_node(state: State, config) -> dict:
         p["credibility"], p["credibility_reasons"] = score_source(
             p["url"], p["source_type"], p["published"], len(p["text"]), p.pop("extra"))
         p["duplicate_of"] = None
+        p["origin"] = source_origin(p["text"], p["domain"])
         sources.append(p)
     ctx.emit("reader", "end", f"Read {len(pages)} of {len(candidates)}"
              + (f" ({len(candidates) - len(pages)} unreadable or blocked)" if len(pages) < len(candidates) else ""))
@@ -272,10 +275,14 @@ def read_node(state: State, config) -> dict:
     for s in sources:
         s["duplicate_of"] = dups.get(s["idx"])
     kinds = Counter(r[0] for s in pages for r in s["credibility_reasons"][:1])
+    wires = Counter(p["origin"] for p in pages if p.get("origin"))
+    wire_note = (f"; {_plural(sum(wires.values()), 'page')} carry wire stories ("
+                 + ", ".join(f"{n} {w}" for w, n in wires.most_common(3)) + ")") if wires else ""
     ctx.emit("credibility", "end",
-             f"Scored {_plural(len(pages), 'source')}; {_plural(len(dups), 'copy')} of other sources set aside",
+             f"Scored {_plural(len(pages), 'source')}; {_plural(len(dups), 'copy')} of other sources set aside"
+             + wire_note,
              {"top_reasons": dict(kinds.most_common(4)),
-              "duplicates": {str(k): v for k, v in dups.items()}})
+              "duplicates": {str(k): v for k, v in dups.items()}, "wire_origins": dict(wires)})
     return {"sources": sources, "candidates": []}
 
 
@@ -434,6 +441,7 @@ def verify_node(state: State, config) -> dict:
         grouped += [([m], None) for m in batch if m["id"] not in seen]  # anything the model left out
 
     clusters: list[dict] = []
+    inflated = 0  # claims that looked agreed but rest on one original source
     for members, verdict in grouped:
         src_ids = sorted({m["source_idx"] for m in members})
         stances = (verdict or {}).get("stances", {})
@@ -447,10 +455,28 @@ def verify_node(state: State, config) -> dict:
         if status == "disputed" and not against and len(src_ids) > 1:
             against = set(src_ids[1:])  # the model flagged a dispute without naming a side
             support = {src_ids[0]}
-        conf = confidence(status, [sources[i]["credibility"] for i in support or set(src_ids)],
-                          [sources[i]["credibility"] for i in against])
+
+        # Independence: copies of one wire story, word-for-word repeats and sources citing each other
+        # count once. "Agreed" needs at least two independent groups behind the claim.
+        groups, reasons = independence_groups(members, sources)
+        support_groups = [g for g in groups if set(g) & (support or set(src_ids))]
+        against_groups = [g for g in groups if set(g) & against]
+        if status == "agreed" and len(support_groups) < 2:
+            status = "single_source"
+            origin = next((sources[i].get("origin") for i in src_ids if sources[i].get("origin")), None)
+            note = (f"Reported by {len(src_ids)} sites, but they trace back to one original source"
+                    + (f" ({origin})" if origin else "") + ": " + "; ".join(reasons) + ".")
+            inflated += 1
+
+        def best(group_list):
+            return [max(sources[i]["credibility"] for i in g) for g in group_list]
+
+        conf = confidence(status, best(support_groups) or [max(sources[i]["credibility"] for i in src_ids)],
+                          best(against_groups))
         clusters.append({
             "text": text, "status": status, "confidence": conf, "note": note, "source_indices": src_ids,
+            "independence": {"independent": len(support_groups) or 1, "sites": len(src_ids),
+                             "groups": [sorted(g) for g in groups], "reasons": reasons},
             "sub_questions": sorted({m["sub_question"] for m in members if m["sub_question"]}),
             "embedding": centroid([vectors[m["id"]] for m in members]),
             "evidence": [{"claim_id": m["id"], "source_idx": m["source_idx"], "statement": m["text"],
@@ -466,8 +492,9 @@ def verify_node(state: State, config) -> dict:
     multi = sum(1 for c in clusters if len(c["source_indices"]) > 1)
     ctx.emit("verifier", "end",
              f"{_plural(len(clusters), 'distinct fact')} ({multi} reported by 2+ sources): {counts['agreed']} agreed, "
-             f"{counts['disputed']} disputed, {counts['single_source']} single-source",
-             {**dict(counts), "method": method})
+             f"{counts['disputed']} disputed, {counts['single_source']} single-source"
+             + (f"; {_plural(inflated, 'claim')} looked agreed but rest on one original source" if inflated else ""),
+             {**dict(counts), "method": method, "copy_inflated": inflated})
     return {"clusters": clusters, "vectors": vectors, "vector_method": method, "verified_ids": claim_ids}
 
 

@@ -86,8 +86,13 @@ def _shingles(text: str, size: int = 6, limit: int = 6000) -> set[int]:
     return {hash(" ".join(words[i:i + size])) for i in range(max(0, len(words) - size + 1))}
 
 
-def find_duplicates(texts: dict[int, str], credibility: dict[int, float], threshold: float = 0.45) -> dict[int, int]:
-    """Map source idx -> idx of the source it copies. The more credible (then earlier) source is kept."""
+def find_duplicates(texts: dict[int, str], credibility: dict[int, float], threshold: float = 0.45,
+                    containment: float = 0.5) -> dict[int, int]:
+    """Map source idx -> idx of the source it copies. The more credible (then earlier) source is kept.
+
+    Two pages are copies when they share most of their wording (Jaccard), or when one contains
+    most of the other (a press release republished with an extra paragraph on top).
+    """
     order = sorted(texts, key=lambda i: (-credibility.get(i, 0.5), i))
     sh = {i: _shingles(texts[i]) for i in order}
     kept: list[int] = []
@@ -99,12 +104,149 @@ def find_duplicates(texts: dict[int, str], credibility: dict[int, float], thresh
             continue
         for k in kept:
             b = sh[k]
-            if b and len(a & b) / len(a | b) >= threshold:
+            if len(b) < 20:
+                continue
+            common = len(a & b)
+            if common / len(a | b) >= threshold or common / min(len(a), len(b)) >= containment:
                 dups[i] = k
                 break
         else:
             kept.append(i)
     return dups
+
+
+# ---------------------------------------------------------------------------
+# Independence ("ten reprints of one wire story are one source")
+# ---------------------------------------------------------------------------
+# News agencies and press-release wires whose stories are widely republished.
+WIRES: dict[str, list[str]] = {
+    "Reuters": ["reuters"],
+    "Associated Press": ["associated press", "ap news", "ap"],
+    "AFP": ["afp", "agence france-presse", "agence france presse"],
+    "Bloomberg": ["bloomberg news"],
+    "PTI": ["press trust of india", "pti"],
+    "ANI": ["asian news international", "ani"],
+    "IANS": ["ians"],
+    "dpa": ["dpa", "deutsche presse-agentur"],
+    "Xinhua": ["xinhua"],
+    "Kyodo": ["kyodo"],
+    "PA Media": ["pa media", "press association"],
+    "Business Wire": ["business wire", "businesswire"],
+    "PR Newswire": ["pr newswire", "prnewswire"],
+    "GlobeNewswire": ["globenewswire", "globe newswire"],
+    "Accesswire": ["accesswire"],
+}
+WIRE_DOMAINS = {"reuters.com": "Reuters", "apnews.com": "Associated Press", "afp.com": "AFP", "ptinews.com": "PTI",
+                "aninews.in": "ANI", "ians.in": "IANS", "dpa.com": "dpa", "xinhuanet.com": "Xinhua",
+                "english.kyodonews.net": "Kyodo", "businesswire.com": "Business Wire", "prnewswire.com": "PR Newswire",
+                "globenewswire.com": "GlobeNewswire", "accesswire.com": "Accesswire"}
+_ATTRIBUTION = r"(?:according to|reported by|reporting by|told|via|citing|source:|said in a statement to|contributed to|\(|—|–|-)"
+_WIRE_RE = {
+    name: re.compile(
+        r"(?:" + _ATTRIBUTION + r"\s*(?:the\s+)?(?:" + "|".join(re.escape(a) for a in aliases) + r")\b)"
+        + r"|(?:\b(?:" + "|".join(re.escape(a) for a in aliases) + r")\s+(?:reported|reports|report|said|says|news agency|wire|analysis)\b)"
+        + r"|(?:\((?:" + "|".join(re.escape(a) for a in aliases) + r")\))",
+        re.IGNORECASE,
+    )
+    for name, aliases in WIRES.items()
+}
+GENERIC_LABELS = {"www", "news", "blog", "com", "org", "net", "gov", "edu", "info", "online", "media", "global",
+                  "home", "site", "web", "data", "report", "reports", "press", "times", "daily", "post", "the"}
+
+
+def registrable_label(domain: str) -> str:
+    """'digital-strategy.ec.europa.eu' -> 'europa', 'www.iea.org' -> 'iea', 'bbc.co.uk' -> 'bbc'."""
+    parts = [p for p in domain.lower().split(".") if p and p != "www"]
+    if len(parts) >= 3 and parts[-2] in ("co", "com", "ac", "gov", "org", "net", "edu") and len(parts[-1]) == 2:
+        parts = parts[:-2]
+    elif len(parts) >= 2:
+        parts = parts[:-1]
+    return parts[-1] if parts else ""
+
+
+def source_origin(text: str, domain: str) -> str | None:
+    """The news wire a page republishes, if any. A wire's own site is its own origin."""
+    domain = domain.lower().removeprefix("www.")
+    for wire_domain, name in WIRE_DOMAINS.items():
+        if domain == wire_domain or domain.endswith("." + wire_domain):
+            return name
+    head = text[:4000]
+    tail = text[-1500:] if len(text) > 4000 else ""
+    for name, pattern in _WIRE_RE.items():
+        if pattern.search(head) or (tail and pattern.search(tail)):
+            return name
+    return None
+
+
+def _norm_quote(q: str) -> str:
+    return " ".join(q.lower().translate(_QUOTES).split())
+
+
+def independence_groups(members: list[dict], sources: dict[int, dict], *, quote_ratio: float = 0.9,
+                        window: int = 320) -> tuple[list[list[int]], list[str]]:
+    """Group the sources behind one claim into independent groups.
+
+    members: evidence items with source_idx, quote, start, end.
+    sources: idx -> source dict with domain, text, origin, credibility.
+    Two sources are dependent when (a) both republish the same wire story, (b) they quote the claim in
+    near-identical words, or (c) one attributes the claim to the other ("the IEA estimates..." when
+    iea.org is also a source). Returns the groups (lists of source idx) and human-readable reasons.
+    """
+    idxs = sorted({m["source_idx"] for m in members})
+    parent = {i: i for i in idxs}
+    reasons: list[str] = []
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(a: int, b: int, why: str) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+            if why not in reasons:
+                reasons.append(why)
+
+    # (a) same wire origin
+    by_origin: dict[str, list[int]] = {}
+    for i in idxs:
+        origin = sources[i].get("origin")
+        if origin:
+            by_origin.setdefault(origin, []).append(i)
+    for origin, group in by_origin.items():
+        for other in group[1:]:
+            union(group[0], other, f"{len(group)} sites carry the same {origin} story")
+
+    # (b) near-identical quotes from different sources
+    quotes = [(m["source_idx"], _norm_quote(m.get("quote", ""))) for m in members if len(m.get("quote", "")) >= 60]
+    for x in range(len(quotes)):
+        for y in range(x + 1, len(quotes)):
+            (ia, qa), (ib, qb) = quotes[x], quotes[y]
+            if ia != ib and SequenceMatcher(None, qa, qb, autojunk=False).ratio() >= quote_ratio:
+                union(ia, ib, "sites repeat the same sentence word for word")
+
+    # (c) one source attributes the claim to another source in the same group
+    labels = {i: registrable_label(sources[i].get("domain", "")) for i in idxs}
+    for m in members:
+        a = m["source_idx"]
+        text = sources[a].get("text", "")
+        start, end = m.get("start", -1), m.get("end", -1)
+        if start < 0 or not text:
+            continue
+        context = text[max(0, start - window):end + window].lower()
+        for b in idxs:
+            lb = labels[b]
+            if b == a or len(lb) < 3 or lb in GENERIC_LABELS or lb == labels[a]:
+                continue
+            if re.search(r"\b" + re.escape(lb) + r"\b", context):
+                union(a, b, f"{sources[a].get('domain', '')} cites {sources[b].get('domain', '')}")
+
+    groups: dict[int, list[int]] = {}
+    for i in idxs:
+        groups.setdefault(find(i), []).append(i)
+    return list(groups.values()), reasons
 
 
 # ---------------------------------------------------------------------------
