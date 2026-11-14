@@ -70,6 +70,11 @@ function SourceRow({ s }: { s: Source }) {
               <Copy className="h-3 w-3" /> copy of [{s.duplicate_of}]
             </span>
           )}
+          {s.origin && s.origin.toLowerCase() !== s.domain.split(".")[0] && (
+            <span className="text-single" title="Republishes a wire story; it counts once with every other copy of that story">
+              via {s.origin}
+            </span>
+          )}
         </div>
         {s.credibility_reasons.length > 0 && <p className="mt-1 text-xs text-faint/80">{s.credibility_reasons.join(" · ")}</p>}
       </div>

@@ -1,11 +1,12 @@
-import { useState } from "react";
-import { ArrowUpRight, Landmark, LineChart, Microscope, Newspaper } from "lucide-react";
+import { useEffect, useState } from "react";
+import { ArrowRight, ArrowUpRight, Landmark, LineChart, Microscope, Newspaper } from "lucide-react";
 import { api, ApiError } from "../api";
 import { useApp } from "../appContext";
 import { navigate } from "../lib/route";
 import { useSession } from "../session";
-import type { Mode } from "../types";
+import type { AlertQuality, ChangeEvent, Mode } from "../types";
 import Composer from "./Composer";
+import ChangeCard from "./watches/ChangeCard";
 import { Logo, useToast } from "./ui";
 
 const EXAMPLES = [
@@ -51,6 +52,12 @@ export function useAsk() {
 export default function HomeView() {
   const { ask, busy } = useAsk();
   const { allowance, config, user } = useSession();
+  const [changes, setChanges] = useState<ChangeEvent[]>([]);
+  useEffect(() => {
+    api<{ changes: ChangeEvent[]; quality: AlertQuality }>("/api/watches/changes?limit=3")
+      .then((r) => setChanges(r.changes))
+      .catch(() => {});
+  }, []);
 
   const firstName = (user?.name || "").split(" ")[0];
 
@@ -62,7 +69,7 @@ export default function HomeView() {
           <h1 className="mt-5 font-serif text-[34px] font-semibold tracking-tight sm:text-[40px]">
             {firstName ? `What should we verify, ${firstName}?` : "What should we verify?"}
           </h1>
-          <p className="mt-2 text-[15px] text-muted">Every claim is checked across sources and labelled agreed, disputed or single-source.</p>
+          <p className="mt-2 text-[15px] text-muted">Every claim is checked against independent sources, and your watches tell you when a fact changes.</p>
         </div>
 
         <Composer large autoFocus busy={busy} placeholder="Ask a research question…" onSubmit={(q, m) => ask(q, m)} />
@@ -81,6 +88,20 @@ export default function HomeView() {
             </button>
           ))}
         </div>
+
+        {changes.length > 0 && (
+          <section className="mt-10 text-left">
+            <div className="mb-2.5 flex items-center justify-between">
+              <h2 className="text-[11px] font-medium uppercase tracking-wider text-faint">What changed in your watches</h2>
+              <button onClick={() => navigate("/watches")} className="flex items-center gap-1 text-xs text-accent hover:underline">
+                All changes <ArrowRight className="h-3 w-3" />
+              </button>
+            </div>
+            <div className="space-y-2">
+              {changes.map((c) => <ChangeCard key={c.id} change={c} showWatch compact />)}
+            </div>
+          </section>
+        )}
 
         {allowance && (
           <p className="mt-8 text-center text-xs text-faint">

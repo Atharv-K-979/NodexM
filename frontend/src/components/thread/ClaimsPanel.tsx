@@ -71,7 +71,7 @@ function ClaimCard({ claim, run }: { claim: Claim; run: Run }) {
   );
 }
 
-function Figures({ run }: { run: Run }) {
+export function Figures({ run }: { run: Run }) {
   return (
     <div className="mt-4 overflow-x-auto rounded-xl border border-line/80">
       <table className="w-full text-sm">

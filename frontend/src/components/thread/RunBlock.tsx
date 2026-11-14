@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertCircle, BookOpen, Layers, ListChecks, RotateCcw, Sparkles } from "lucide-react";
+import { AlertCircle, BookOpen, Layers, RotateCcw, ShieldCheck, Sparkles } from "lucide-react";
 import { api, streamEvents } from "../../api";
 import { money, timeAgo } from "../../lib/format";
-import type { ClaimStatus, DraftInfo, Mode, Run, TraceEntry } from "../../types";
+import type { DraftInfo, Mode, Run, TraceEntry } from "../../types";
 import { useToast } from "../ui";
 import AnswerView from "./AnswerView";
-import ClaimsPanel from "./ClaimsPanel";
+import FactsView from "./FactsView";
 import SourcesPanel, { SourceStrip } from "./SourcesPanel";
 import TracePanel, { ProgressPanel } from "./TracePanel";
 
-type Tab = "answer" | "sources" | "claims" | "steps";
+type Tab = "facts" | "answer" | "sources" | "steps";
 
 interface Props {
   initial: Run;
@@ -21,8 +21,7 @@ export default function RunBlock({ initial, onFinished, onRetry }: Props) {
   const toast = useToast();
   const [run, setRun] = useState<Run>(initial);
   const [trace, setTrace] = useState<TraceEntry[]>(initial.trace);
-  const [tab, setTab] = useState<Tab>("answer");
-  const [claimFilter, setClaimFilter] = useState<"all" | ClaimStatus>("all");
+  const [tab, setTab] = useState<Tab>("facts");
   const active = run.status === "queued" || run.status === "running";
   const finishedRef = useRef(onFinished);
   finishedRef.current = onFinished;
@@ -73,9 +72,9 @@ export default function RunBlock({ initial, onFinished, onRetry }: Props) {
 
   const setDraft = (d: DraftInfo) => setRun((r) => ({ ...r, draft: d }));
   const tabs: { key: Tab; label: string; icon: typeof Sparkles; count?: number }[] = [
+    { key: "facts", label: "Facts", icon: ShieldCheck, count: run.claims.length },
     { key: "answer", label: "Answer", icon: Sparkles },
     { key: "sources", label: "Sources", icon: BookOpen, count: run.sources.length },
-    { key: "claims", label: "Claims", icon: ListChecks, count: run.claims.length },
     { key: "steps", label: "Steps", icon: Layers },
   ];
 
@@ -110,9 +109,9 @@ export default function RunBlock({ initial, onFinished, onRetry }: Props) {
       </div>
 
       <div className="pt-5">
-        {active && tab === "answer" && <ProgressPanel run={run} trace={trace} onCancel={cancel} />}
+        {active && (tab === "facts" || tab === "answer") && <ProgressPanel run={run} trace={trace} onCancel={cancel} />}
 
-        {!active && (run.status === "failed" || run.status === "cancelled") && tab === "answer" && (
+        {!active && (run.status === "failed" || run.status === "cancelled") && (tab === "facts" || tab === "answer") && (
           <div className="rounded-xl border border-disputed/30 bg-disputed/5 p-4">
             <p className="flex items-center gap-2 text-sm font-medium text-disputed">
               <AlertCircle className="h-4 w-4" /> {run.status === "cancelled" ? "Stopped" : "This research run failed"}
@@ -127,11 +126,11 @@ export default function RunBlock({ initial, onFinished, onRetry }: Props) {
         {tab === "answer" && run.status === "completed" && run.draft && (
           <div className="space-y-6">
             <SourceStrip run={run} onMore={() => setTab("sources")} />
-            <AnswerView run={run} onDraft={setDraft} onShowClaims={(f) => { setClaimFilter(f); setTab("claims"); }} />
+            <AnswerView run={run} onDraft={setDraft} onShowClaims={() => setTab("facts")} />
           </div>
         )}
         {tab === "sources" && <SourcesPanel run={run} />}
-        {tab === "claims" && <ClaimsPanel key={claimFilter} run={run} initial={claimFilter} />}
+        {tab === "facts" && run.status === "completed" && <FactsView run={run} onReadAnswer={() => setTab("answer")} />}
         {tab === "steps" && <TracePanel run={{ ...run, trace }} />}
       </div>
     </article>

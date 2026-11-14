@@ -5,7 +5,8 @@ import { useApp } from "../../appContext";
 import { dateTime, STATUS_LABEL, statusChip, timeAgo } from "../../lib/format";
 import { navigate } from "../../lib/route";
 import { useSession } from "../../session";
-import type { ChangeEvent, Mode, Watch } from "../../types";
+import type { AlertQuality, ChangeEvent, Mode, Watch } from "../../types";
+import ChangeCard, { QualityBadge } from "./ChangeCard";
 import { Modal, Segmented, Spinner, useToast } from "../ui";
 
 const CADENCES = [
@@ -20,7 +21,11 @@ const CADENCES = [
 export function WatchesView() {
   const [watches, setWatches] = useState<Watch[] | null>(null);
   const [creating, setCreating] = useState(false);
-  const load = useCallback(() => api<Watch[]>("/api/watches").then(setWatches).catch(() => setWatches([])), []);
+  const [feed, setFeed] = useState<{ changes: ChangeEvent[]; quality: AlertQuality } | null>(null);
+  const load = useCallback(() => {
+    api<Watch[]>("/api/watches").then(setWatches).catch(() => setWatches([]));
+    api<{ changes: ChangeEvent[]; quality: AlertQuality }>("/api/watches/changes?limit=10").then(setFeed).catch(() => {});
+  }, []);
   useEffect(() => {
     load();
   }, [load]);
@@ -37,6 +42,20 @@ export function WatchesView() {
         </div>
         <button className="btn-primary" onClick={() => setCreating(true)}><Plus className="h-4 w-4" /> New watch</button>
       </div>
+
+      {feed && feed.changes.length > 0 && (
+        <section className="mt-8">
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-[11px] font-medium uppercase tracking-wider text-faint">Recent changes across your watches</h2>
+            <QualityBadge quality={feed.quality} />
+          </div>
+          <div className="space-y-2.5">
+            {feed.changes.map((c) => (
+              <ChangeCard key={c.id} change={c} showWatch compact onFeedback={(_, q) => setFeed((f) => (f ? { ...f, quality: q } : f))} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {watches === null ? (
         <div className="flex justify-center py-20 text-faint"><Loader2 className="h-5 w-5 animate-spin" /></div>
@@ -126,13 +145,6 @@ function NewWatchModal({ open, onClose, onCreated }: { open: boolean; onClose: (
   );
 }
 
-const KIND: Record<ChangeEvent["kind"], { label: string; tone: string }> = {
-  status_changed: { label: "Status changed", tone: "border-disputed" },
-  returned: { label: "Back again", tone: "border-accent" },
-  new: { label: "New claim", tone: "border-agreed" },
-  stale: { label: "No longer found", tone: "border-single" },
-};
-
 export function WatchView({ id }: { id: number }) {
   const [watch, setWatch] = useState<Watch | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -201,29 +213,22 @@ export function WatchView({ id }: { id: number }) {
       </div>
 
       <section className="mt-10">
-        <h2 className="text-[11px] font-medium uppercase tracking-wider text-faint">What changed</h2>
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-[11px] font-medium uppercase tracking-wider text-faint">What changed</h2>
+          <QualityBadge quality={watch.quality} />
+        </div>
         {!watch.changes?.length ? (
           <p className="mt-3 rounded-xl border border-dashed border-line px-4 py-6 text-sm text-muted">
             {watch.runs?.length
-              ? "No changes yet. The first run sets the baseline; later runs are compared with it."
+              ? "No confirmed changes yet. The first run sets the baseline; a change is only alerted once a new independent source backs it or it shows up on two runs in a row."
               : "No runs yet. Run it now to set the baseline."}
           </p>
         ) : (
-          <ul className="mt-3 space-y-2.5">
+          <div className="mt-3 space-y-2.5">
             {watch.changes.map((e) => (
-              <li key={e.id} className={`rounded-xl border border-line/80 border-l-[3px] bg-card/50 p-3.5 ${KIND[e.kind].tone}`}>
-                <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="font-medium">{KIND[e.kind].label}</span>
-                  {e.from_status && <span className={statusChip(e.from_status)}>{STATUS_LABEL[e.from_status] ?? e.from_status}</span>}
-                  {e.from_status && <span className="text-faint">→</span>}
-                  {e.to_status && <span className={statusChip(e.to_status)}>{STATUS_LABEL[e.to_status] ?? e.to_status}</span>}
-                  <span className="ml-auto text-faint">{timeAgo(e.created_at)}</span>
-                </div>
-                <p className="mt-2 text-[14px] leading-relaxed">{e.claim}</p>
-                {e.detail && <p className="mt-1 text-[13px] text-muted">{e.detail}</p>}
-              </li>
+              <ChangeCard key={e.id} change={e} onFeedback={(_, q) => setWatch((w) => (w ? { ...w, quality: q } : w))} />
             ))}
-          </ul>
+          </div>
         )}
       </section>
 
@@ -234,8 +239,19 @@ export function WatchView({ id }: { id: number }) {
             {watch.ledger.map((c) => (
               <li key={c.id} className="flex items-start gap-3 px-3.5 py-3 text-[13.5px]">
                 <span className={`${statusChip(c.status)} mt-0.5 shrink-0`}>{STATUS_LABEL[c.status] ?? c.status}</span>
-                <span className="flex-1 leading-relaxed text-muted">{c.text}</span>
-                <span className="shrink-0 font-mono text-[11px] text-faint">{Math.round(c.confidence * 100)}%</span>
+                <span className="flex-1 leading-relaxed text-muted">
+                  {c.text}
+                  {!c.confirmed && <span className="mt-1 block text-[11.5px] text-single">New, waiting for a second sighting before it is alerted</span>}
+                  {c.pending_status && (
+                    <span className="mt-1 block text-[11.5px] text-single">
+                      Possible change to {STATUS_LABEL[c.pending_status] ?? c.pending_status}, waiting for confirmation
+                    </span>
+                  )}
+                </span>
+                <span className="shrink-0 text-right font-mono text-[11px] text-faint">
+                  {Math.round(c.confidence * 100)}%
+                  <span className="block">{c.sources} src</span>
+                </span>
               </li>
             ))}
           </ul>

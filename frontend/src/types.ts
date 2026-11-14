@@ -52,6 +52,7 @@ export interface Source {
   credibility_reasons: string[];
   snippet: string;
   duplicate_of: number | null;
+  origin: string | null;
   evidence_count: number;
 }
 
@@ -73,6 +74,7 @@ export interface Claim {
   note: string;
   sources: number[];
   evidence: Evidence[];
+  independence: { independent: number; supporting: number; sites: number; groups: number[][]; reasons: string[] };
 }
 
 export interface DraftInfo {
@@ -140,15 +142,39 @@ export interface ThreadDetail extends ThreadSummary {
   runs: Run[];
 }
 
+export interface QuoteSnapshot {
+  source?: number;
+  domain: string;
+  url?: string;
+  quote: string;
+  stance: "supports" | "contradicts" | "unrelated";
+  credibility?: number;
+}
+
 export interface ChangeEvent {
   id: number;
+  watch_id: number;
   run_id: string;
   kind: "new" | "status_changed" | "stale" | "returned";
   from_status: string | null;
   to_status: string | null;
   claim: string;
   detail: string;
+  confirmation: "" | "repeat" | "new_source" | "strong" | "stale";
+  before: QuoteSnapshot[];
+  after: QuoteSnapshot[];
+  feedback: "real" | "noise" | null;
   created_at: string;
+  watch_topic?: string;
+  thread_id?: string | null;
+}
+
+export interface AlertQuality {
+  alerts: number;
+  reviewed: number;
+  real: number;
+  noise: number;
+  precision: number | null;
 }
 
 export interface Watch {
@@ -164,8 +190,19 @@ export interface Watch {
   last_run_id: string | null;
   created_at: string;
   recent_changes: number;
+  quality: AlertQuality;
   changes?: ChangeEvent[];
-  ledger?: { id: number; text: string; status: string; confidence: number; updated_at: string }[];
+  ledger?: {
+    id: number;
+    text: string;
+    status: string;
+    confidence: number;
+    confirmed: boolean;
+    pending_status: string | null;
+    pending_runs: number;
+    sources: number;
+    updated_at: string;
+  }[];
   runs?: { id: string; status: RunStatus; created_at: string; mode: Mode; cost_usd: number }[];
 }
 
