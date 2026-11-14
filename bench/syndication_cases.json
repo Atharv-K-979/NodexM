@@ -1,0 +1,371 @@
+{
+  "name": "NodexM syndication test set",
+  "version": "0.2",
+  "note": "Hand-written, synthetic cases. Each case lists the sources behind one claim, the sentence each source uses for it, and the true independent groups (sources that trace back to the same original are in one group). IN-SAMPLE: the method was adjusted after seeing these cases (the 'credits the same organisation' rule was added after hard-shared-primary-not-in-list was missed), so scores here are a sanity check, not a public benchmark. A public benchmark needs real-world cases labeled by someone who did not build the method.",
+  "cases": [
+    {
+      "id": "reuters-dateline",
+      "description": "Three sites carry the same Reuters story with different wording",
+      "sources": [
+        {
+          "domain": "reuters.com",
+          "text": "Acme raised $50 million in a funding round led by Northwind, the company said on Monday."
+        },
+        {
+          "domain": "thestar.com",
+          "text": "TORONTO (Reuters) - Acme has secured $50 million in new capital from investors led by Northwind."
+        },
+        {
+          "domain": "finance.yahoo.com",
+          "text": "Startup Acme pulled in $50 million this week, according to Reuters, in a round led by Northwind."
+        }
+      ],
+      "quotes": [
+        "Acme raised $50 million in a funding round led by Northwind",
+        "Acme has secured $50 million in new capital from investors led by Northwind",
+        "Startup Acme pulled in $50 million this week"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "ap-plus-own-reporting",
+      "description": "Two outlets run the AP story; a third did its own analysis",
+      "sources": [
+        {
+          "domain": "abcnews.go.com",
+          "text": "WASHINGTON (AP) — The Senate passed the chip subsidy bill 68-32 on Thursday."
+        },
+        {
+          "domain": "local10.com",
+          "text": "The Senate approved the chip subsidy bill by 68 votes to 32, the Associated Press reported."
+        },
+        {
+          "domain": "ft.com",
+          "text": "Our tally of the roll call shows the chip subsidy bill cleared the Senate 68-32, with 17 Republicans in favour."
+        }
+      ],
+      "quotes": [
+        "The Senate passed the chip subsidy bill 68-32 on Thursday",
+        "The Senate approved the chip subsidy bill by 68 votes to 32",
+        "the chip subsidy bill cleared the Senate 68-32"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ],
+        [
+          2
+        ]
+      ]
+    },
+    {
+      "id": "bloomberg-attribution",
+      "description": "Two blogs repeat a Bloomberg scoop",
+      "sources": [
+        {
+          "domain": "techblog.example",
+          "text": "Northwind is in talks to buy Acme for about $2 billion, according to Bloomberg, citing people familiar with the matter."
+        },
+        {
+          "domain": "dealwatch.example",
+          "text": "Bloomberg reported that Northwind is negotiating an acquisition of Acme valued near $2 billion."
+        }
+      ],
+      "quotes": [
+        "Northwind is in talks to buy Acme for about $2 billion",
+        "Northwind is negotiating an acquisition of Acme valued near $2 billion"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "pti-dateline",
+      "description": "Two Indian outlets carry the same PTI wire copy",
+      "sources": [
+        {
+          "domain": "thehindu.com",
+          "text": "NEW DELHI, Nov 3 (PTI) The government cut the GST rate on health insurance premiums to 5 per cent."
+        },
+        {
+          "domain": "indianexpress.com",
+          "text": "The GST on health insurance premiums has been reduced to 5 per cent, PTI reported on Monday."
+        }
+      ],
+      "quotes": [
+        "The government cut the GST rate on health insurance premiums to 5 per cent",
+        "The GST on health insurance premiums has been reduced to 5 per cent"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "cites-primary-in-list",
+      "description": "A news site attributes the figure to the IEA, whose own report is also a source",
+      "sources": [
+        {
+          "domain": "iea.org",
+          "text": "Data centres consumed around 415 TWh of electricity in 2024, about 1.5% of global demand."
+        },
+        {
+          "domain": "energynews.example",
+          "text": "Global data centres used roughly 415 terawatt-hours in 2024, the IEA estimates in its latest report."
+        }
+      ],
+      "quotes": [
+        "Data centres consumed around 415 TWh of electricity in 2024",
+        "Global data centres used roughly 415 terawatt-hours in 2024"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "word-for-word",
+      "description": "Two blogs paste the same sentence",
+      "sources": [
+        {
+          "domain": "blog-one.example",
+          "text": "Intro. The regulation requires providers of general-purpose AI models to publish a summary of their training data."
+        },
+        {
+          "domain": "blog-two.example",
+          "text": "News: The regulation requires providers of general-purpose AI models to publish a summary of their training data."
+        }
+      ],
+      "quotes": [
+        "The regulation requires providers of general-purpose AI models to publish a summary of their training data",
+        "The regulation requires providers of general-purpose AI models to publish a summary of their training data"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "independent-reporting",
+      "description": "Two outlets with their own data reach the same number",
+      "sources": [
+        {
+          "domain": "ft.com",
+          "text": "Our survey of 40 lenders found mortgage approvals fell 12% in October."
+        },
+        {
+          "domain": "nature.com",
+          "text": "A separate dataset of bank filings shows approvals dropped by 12% in October."
+        }
+      ],
+      "quotes": [
+        "Our survey of 40 lenders found mortgage approvals fell 12% in October",
+        "A separate dataset of bank filings shows approvals dropped by 12% in October"
+      ],
+      "truth_groups": [
+        [
+          0
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "id": "paper-and-statistics",
+      "description": "A peer-reviewed paper and an official statistics release report the same rate independently",
+      "sources": [
+        {
+          "domain": "thelancet.com",
+          "text": "In our cohort of 1.2 million adults, diabetes prevalence was 10.5% in 2023."
+        },
+        {
+          "domain": "cdc.gov",
+          "text": "National surveillance data put diabetes prevalence among adults at 10.5 percent for 2023."
+        }
+      ],
+      "quotes": [
+        "diabetes prevalence was 10.5% in 2023",
+        "National surveillance data put diabetes prevalence among adults at 10.5 percent for 2023"
+      ],
+      "truth_groups": [
+        [
+          0
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "id": "hard-shared-primary-not-in-list",
+      "description": "HARD: both outlets cite the Office for National Statistics, which is not among the sources. Truly one original source; the current method is expected to miss this.",
+      "sources": [
+        {
+          "domain": "bbc.co.uk",
+          "text": "UK inflation fell to 2.3% in October, according to the Office for National Statistics."
+        },
+        {
+          "domain": "theguardian.com",
+          "text": "Consumer price inflation eased to 2.3% last month, official figures from the ONS showed."
+        }
+      ],
+      "quotes": [
+        "UK inflation fell to 2.3% in October",
+        "Consumer price inflation eased to 2.3% last month"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "hard-shared-company-statement",
+      "description": "HARD: two outlets quote the same company statement in different words. Truly one original source; expected to be missed.",
+      "sources": [
+        {
+          "domain": "techcrunch.com",
+          "text": "Acme will lay off 200 employees, or 8% of its staff, the company said in a statement."
+        },
+        {
+          "domain": "theverge.com",
+          "text": "In a memo shared with staff, Acme confirmed it is cutting 200 jobs, about 8 percent of the workforce."
+        }
+      ],
+      "quotes": [
+        "Acme will lay off 200 employees, or 8% of its staff",
+        "Acme confirmed it is cutting 200 jobs, about 8 percent of the workforce"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    },
+    {
+      "id": "hard-wire-mention-unrelated",
+      "description": "HARD (false alarm test): a page mentions Reuters about an older story but reports its own figure; it is independent of the other source.",
+      "sources": [
+        {
+          "domain": "wsj.com",
+          "text": "Our analysis of shipping manifests shows container rates rose 18% in September. Reuters reported last year that rates had fallen."
+        },
+        {
+          "domain": "drewry.co.uk",
+          "text": "The World Container Index rose 18% in September on our assessed spot rates."
+        }
+      ],
+      "quotes": [
+        "container rates rose 18% in September",
+        "The World Container Index rose 18% in September"
+      ],
+      "truth_groups": [
+        [
+          0
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "id": "mixed-wire-and-primary",
+      "description": "Two sites carry an AFP story; one copy credits the WHO, whose own page is also a source. All three trace back to the WHO.",
+      "sources": [
+        {
+          "domain": "who.int",
+          "text": "Measles cases rose to 10.3 million worldwide in 2023, a 20% increase on 2022."
+        },
+        {
+          "domain": "france24.com",
+          "text": "GENEVA (AFP) - Global measles cases climbed 20 percent to 10.3 million last year, the WHO said on Thursday."
+        },
+        {
+          "domain": "news24.com",
+          "text": "Measles infections worldwide reached 10.3 million in 2023, up a fifth, AFP reported."
+        }
+      ],
+      "quotes": [
+        "Measles cases rose to 10.3 million worldwide in 2023",
+        "Global measles cases climbed 20 percent to 10.3 million last year",
+        "Measles infections worldwide reached 10.3 million in 2023"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1,
+          2
+        ]
+      ]
+    },
+    {
+      "id": "different-credited-orgs",
+      "description": "Two outlets report the same rate but credit different organisations; they are independent",
+      "sources": [
+        {
+          "domain": "bbc.co.uk",
+          "text": "Unemployment held at 4.3% in the three months to September, according to the Office for National Statistics."
+        },
+        {
+          "domain": "rec-survey.example",
+          "text": "Unemployment stayed at 4.3% in its latest poll of employers, the Recruitment and Employment Confederation said."
+        }
+      ],
+      "quotes": [
+        "Unemployment held at 4.3% in the three months to September",
+        "Unemployment stayed at 4.3% in its latest poll of employers"
+      ],
+      "truth_groups": [
+        [
+          0
+        ],
+        [
+          1
+        ]
+      ]
+    },
+    {
+      "id": "same-commission-statement",
+      "description": "Two outlets report the same European Commission announcement",
+      "sources": [
+        {
+          "domain": "politico.eu",
+          "text": "The fine of 500 million euros is the largest under the Digital Markets Act so far, the European Commission said on Tuesday."
+        },
+        {
+          "domain": "euractiv.com",
+          "text": "According to the European Commission, the 500 million euro penalty is the biggest yet under the DMA."
+        }
+      ],
+      "quotes": [
+        "The fine of 500 million euros is the largest under the Digital Markets Act so far",
+        "the 500 million euro penalty is the biggest yet under the DMA"
+      ],
+      "truth_groups": [
+        [
+          0,
+          1
+        ]
+      ]
+    }
+  ]
+}

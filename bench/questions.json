@@ -1,0 +1,19 @@
+{
+  "name": "NodexM copy-inflation question set",
+  "version": "0.1",
+  "note": "Questions about recent, widely reported facts, where news is often syndicated from wires or press releases. Used to measure how often counting sites would overstate agreement.",
+  "questions": [
+    "How much did OpenAI raise in its most recent funding round, and at what valuation?",
+    "What did the US Federal Reserve decide on interest rates at its most recent meeting?",
+    "What is the latest UK consumer price inflation rate?",
+    "When do the EU AI Act obligations for general-purpose AI models apply?",
+    "What were Nvidia's total revenue and data centre revenue in its latest reported quarter?",
+    "What is India's latest quarterly GDP growth rate?",
+    "How many measles cases were reported worldwide in 2024?",
+    "What does the latest UNEP Emissions Gap Report project for global warming this century?",
+    "What was the average price of lithium-ion battery packs in 2025?",
+    "How many jobs has Amazon cut in its 2025 and 2026 layoffs?",
+    "How much did global electric car sales grow in 2025?",
+    "What is the maximum fine under the EU AI Act for prohibited AI practices?"
+  ]
+}
