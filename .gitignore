@@ -229,3 +229,6 @@ frontend/dist/
 
 # Local start script
 .start.sh
+
+# Generated documents and research notes (local only)
+docx/
