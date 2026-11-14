@@ -81,20 +81,57 @@ router → planner → specialist searchers → reader → credibility → extra
 | Planner | Splits the question into sub-questions and assigns searchers | Lite model |
 | Specialist searchers | Web, academic, regulatory, news and data search in parallel | Tavily/SearXNG, OpenAlex, arXiv, Semantic Scholar, Federal Register, official domains, GDELT, FRED |
 | Reader | Reads full pages and PDFs, respects robots.txt | Jina Reader or trafilatura + pypdf |
-| Credibility scorer | Scores each source and sets aside copies of other sources | Rules (code) |
+| Credibility scorer | Scores each source, sets aside copies of other pages and tags pages that republish a wire story | Rules (code) |
 | Extractor | Pulls claims with an exact quote; quotes not found in the page are dropped | Lite model + quote locator |
 | Claim clusterer | Groups claims that state the same fact | Embeddings, or word vectors as fallback |
-| Verifier | Labels each group agreed or disputed, with stances per source | Flash model |
+| Verifier | Groups claims by fact, labels each agreed or disputed, then counts independent sources (agreed needs two) | Flash model + rules |
 | Gap finder | Searches again where evidence is thin | Lite model |
 | Devil's advocate | Looks for counter-evidence and for sources that settle disputes | Lite model |
 | Quant analyst | Normalises figures and flags where sources measure differently | Flash model |
 | Writer | Writes only from verified claims, cites every fact, shows both sides of disputes | Flash model (Lite in Quick mode) |
 | Critic | Scores accuracy, completeness and clarity | Lite model |
 | Citation auditor | Checks each cited sentence against the source it cites | Code |
-| Change detector | Compares a Watch run with the claim ledger | Code |
+| Change detector | Compares a Watch run with the claim ledger and alerts only on confirmed changes | Code |
 
 Quick mode reads about 8 sources in one pass. Deep mode reads up to 24, with gap-filling and a
 counter-evidence round. Both have hard limits on searches, sources and revisions, so cost stays predictable.
+
+## Independent sources, not sites
+
+A claim only counts as **agreed** when at least two *independent* original sources back it. Sources are
+grouped as one original when:
+
+- they republish the same wire story (datelines such as "LONDON (Reuters) -", "(AP)", "(PTI)", or
+  "according to Bloomberg", and press-release wires);
+- they quote the claim in near-identical words, or one page mostly contains another;
+- one source attributes the claim to another source in the list ("the IEA estimates…" while iea.org is cited);
+- they credit the same organisation, even if it is not in the list ("according to the Office for National
+  Statistics" and "figures from the ONS").
+
+Each claim shows how many sites reported it and how many independent sources that really is, for example
+"3 sites → 1 independent source (Reuters)". Answers open on a **Facts** tab that leads with disputes, then
+facts confirmed by independent sources, then facts resting on one original source.
+
+## Watches: confirmed changes only
+
+AI research results vary between identical runs, so a Watch only alerts when a change is **confirmed**:
+either a new independent source backs it, or it shows up on two runs in a row. Until then it waits as a
+pending change. A new fact with one source is a candidate until it is seen again; a fact is only stale
+after three missed runs. Every alert keeps the quotes before and after, and says why it was confirmed.
+Mark alerts as **Real change** or **Noise** to measure alert precision for each Watch.
+
+## Benchmarks
+
+```bash
+python -m bench.eval_syndication             # offline, free: scores source-independence detection
+python -m bench.run_benchmark --limit 3      # live, uses your keys: copy inflation, citation support, cost
+python -m bench.run_benchmark --mode deep    # all 12 questions in Deep mode (about $1.70)
+```
+
+`bench/syndication_cases.json` is a small hand-labeled test set, including cases the method is known to
+miss; the live runner uses `bench/questions.json`. Reports are written to `docx/benchmark/` (local only).
+The labeled set is in-sample, so treat its scores as a sanity check until real-world cases are labeled by
+someone else. Free-tier Gemini keys can hit daily limits on longer runs.
 
 ## Free runs and costs
 
@@ -115,14 +152,15 @@ nodexm/
   agents.py              LLM agents and their prompts
   search.py, reader.py   specialist searchers and full-text reader (24h cache in cache.py)
   credibility.py         source scoring
-  evidence.py            quote locating, duplicates, clustering, confidence, citation audit
+  evidence.py            quote locating, duplicates, source independence, clustering, confidence, citation audit
   pipeline.py            the LangGraph research graph
   ledger.py              Watch claim ledger and change detection
   jobs.py                run queue, worker threads, Watch scheduler, live events
   quota.py               free-run allowance and daily budget
   routes/                REST API: auth, settings, threads, runs (incl. SSE), watches
 frontend/                React + Vite + Tailwind app
-tests/                   offline tests for the evidence engine, pipeline, jobs and API
+bench/                   source-independence test set and the live copy-inflation benchmark
+tests/                   offline tests for the evidence engine, pipeline, ledger, jobs and API
 ```
 
 ## API overview
@@ -137,4 +175,5 @@ All endpoints except register, login, health and config need `Authorization: Bea
 | `GET /api/runs/{id}`, `GET /api/runs/{id}/events` | Full answer, live trace (server-sent events) |
 | `PATCH /api/runs/{id}/draft`, `POST .../rewrite-section`, `POST .../approve`, `GET .../export` | Review |
 | `GET/POST /api/watches`, `GET/PATCH/DELETE /api/watches/{id}`, `POST /api/watches/{id}/run` | Watches |
+| `GET /api/watches/changes`, `POST /api/watches/{id}/changes/{change_id}/feedback` | Recent changes, real/noise verdicts |
 | `GET/PUT /api/settings`, `PUT /api/settings/keys`, `GET /api/usage` | Settings and usage |
