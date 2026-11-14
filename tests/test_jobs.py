@@ -110,15 +110,30 @@ def test_watch_ledger_detects_status_change(monkeypatch):
             assert s.exec(select(LedgerClaim).where(LedgerClaim.watch_id == watch.id)).all()
             assert not s.exec(select(ChangeEvent).where(ChangeEvent.watch_id == watch.id)).all()  # baseline
 
-            # Second run: the blog with the conflicting figure is gone, so the dispute resolves.
+            # Second run: the blog with the conflicting figure is gone, so the dispute looks resolved.
+            # No new independent source backs that, so it waits for confirmation instead of alerting.
             original = fakes.fake_search
             monkeypatch.setattr(pipeline, "run_searcher",
                                 lambda n, q, c: [h for h in original(n, q, c) if "medium.com" not in h.url])
-            second = run_now(s, user, mode="quick", watch=watch, thread=s.get(jobs.Thread, first.thread_id))
+            thread = s.get(jobs.Thread, first.thread_id)
+            second = run_now(s, user, mode="quick", watch=watch, thread=thread)
             assert second.status == "completed", second.error
-            events = s.exec(select(ChangeEvent).where(ChangeEvent.run_id == second.id)).all()
-            assert any(e.kind == "status_changed" and e.from_status == "disputed" and e.to_status == "agreed"
-                       for e in events), [(e.kind, e.from_status, e.to_status) for e in events]
-            assert any(t["node"] == "change_detector" for t in second.trace)
+            assert not s.exec(select(ChangeEvent).where(ChangeEvent.run_id == second.id)).all()
+            pending = s.exec(select(LedgerClaim).where(LedgerClaim.watch_id == watch.id,
+                                                       LedgerClaim.pending_status == "agreed")).all()
+            assert len(pending) == 1
+            assert any(t["node"] == "change_detector" and "confirmed or dropped on the next run" in t["summary"]
+                       for t in second.trace)
+
+            # Third run shows the same thing again: now the change is confirmed and alerted.
+            third = run_now(s, user, mode="quick", watch=watch, thread=thread)
+            events = s.exec(select(ChangeEvent).where(ChangeEvent.run_id == third.id)).all()
+            flips = [e for e in events if e.kind == "status_changed"]
+            assert len(flips) == 1, [(e.kind, e.from_status, e.to_status) for e in events]
+            flip = flips[0]
+            assert (flip.from_status, flip.to_status, flip.confirmation) == ("disputed", "agreed", "repeat")
+            assert any(q["stance"] == "contradicts" for q in flip.evidence_before)  # the blog's figure, before
+            assert all(q["stance"] == "supports" for q in flip.evidence_after)
+            assert any(t["node"] == "change_detector" for t in third.trace)
     finally:
         object.__setattr__(settings, "admin_emails", [])

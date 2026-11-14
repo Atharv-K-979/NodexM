@@ -137,7 +137,31 @@ def _thread_context(session: Session, run: Run) -> str:
     return "\n\n".join(parts)
 
 
-def _persist_result(session: Session, run: Run, result: dict) -> list[Claim]:
+def claim_snapshot(cluster: dict, sources: list[dict]) -> dict:
+    """What the Watch ledger remembers about a claim: its quotes and which independent sources
+    (a wire name or a registrable site) back it or contradict it."""
+    by_idx = {s["idx"]: s for s in sources}
+    evidence = [{
+        "source": e["source_idx"] + 1, "domain": by_idx[e["source_idx"]]["domain"],
+        "url": by_idx[e["source_idx"]]["url"], "quote": e["quote"][:400], "stance": e["stance"],
+        "credibility": by_idx[e["source_idx"]]["credibility"],
+    } for e in cluster["evidence"]]
+    stance_of = {}
+    for e in cluster["evidence"]:
+        stance_of.setdefault(e["source_idx"], set()).add(e["stance"])
+    keys: dict[str, list[str]] = {"supports": [], "contradicts": []}
+    groups = (cluster.get("independence") or {}).get("groups") or [[i] for i in cluster["source_indices"]]
+    for group in groups:
+        best = max(group, key=lambda i: by_idx[i]["credibility"])
+        key = next((by_idx[i]["origin"] for i in group if by_idx[i].get("origin")), None) \
+            or by_idx[best]["domain"].removeprefix("www.")
+        for stance in ("supports", "contradicts"):
+            if any(stance in stance_of.get(i, set()) for i in group) and key not in keys[stance]:
+                keys[stance].append(key)
+    return {"evidence": evidence, "keys": keys}
+
+
+def _persist_result(session: Session, run: Run, result: dict) -> tuple[list[Claim], dict[int, dict]]:
     for s in result["sources"]:
         session.add(Source(run_id=run.id, idx=s["idx"], url=s["url"], title=s["title"][:600], domain=s["domain"],
                            source_type=s["source_type"], searcher=s["searcher"],
@@ -146,7 +170,7 @@ def _persist_result(session: Session, run: Run, result: dict) -> list[Claim]:
                            duplicate_of=s.get("duplicate_of"), origin=s.get("origin"),
                            snippet=s.get("snippet", "")[:2000], text=s["text"],
                            sub_question=(s.get("sub_question") or "")[:1000]))
-    claims = []
+    claims, snapshots = [], {}
     for c in result["clusters"]:
         row = Claim(run_id=run.id, key=c["key"], text=c["text"], status=c["status"], confidence=c["confidence"],
                     note=c.get("note", ""), source_indices=c["source_indices"], embedding=c.get("embedding"),
@@ -157,6 +181,7 @@ def _persist_result(session: Session, run: Run, result: dict) -> list[Claim]:
             session.add(Evidence(claim_id=row.id, run_id=run.id, source_idx=e["source_idx"], statement=e["statement"],
                                  quote=e["quote"], char_start=e["start"], char_end=e["end"], stance=e["stance"]))
         claims.append(row)
+        snapshots[row.id] = claim_snapshot(c, result["sources"])
     critique, audit = result.get("critique") or {}, result.get("audit") or {}
     session.add(Draft(run_id=run.id, content_md=result["report_md"], content_html=result["report_html"],
                       critic_score=critique.get("overall"), audit_score=audit.get("score")))
@@ -164,7 +189,7 @@ def _persist_result(session: Session, run: Run, result: dict) -> list[Claim]:
     run.standalone_question = result.get("standalone")
     run.result = {k: result.get(k) for k in ("plan", "figures", "critique", "audit", "warnings", "rounds",
                                              "queries_run", "revisions")}
-    return claims
+    return claims, snapshots
 
 
 def execute_run(run_id: str) -> None:
@@ -212,10 +237,10 @@ def execute_run(run_id: str) -> None:
         email = None
         with Session(engine) as session:
             run = session.get(Run, run_id)
-            claims = _persist_result(session, run, result)
+            claims, snapshots = _persist_result(session, run, result)
             if run.watch_id:
                 watch = session.get(Watch, run.watch_id)
-                events = update_ledger(session, watch, run, claims)
+                events, stats = update_ledger(session, watch, run, claims, snapshots)
                 watch.last_run_id = run.id
                 session.add(watch)
                 kinds = sorted({e.kind for e in events})
@@ -224,14 +249,17 @@ def execute_run(run_id: str) -> None:
                     link = f"{settings.app_url}/#/t/{run.thread_id}"
                     email = (user.email, f"NodexM: {len(events)} change(s) in “{watch.topic[:60]}”",
                              change_brief_html(watch, events, link))
-                change_summary = (f"{len(events)} change(s) since the last run" if events
-                                  else "No changes since the last run")
+                waiting = stats["pending"] + stats["candidates"]
+                change_summary = ((f"{len(events)} confirmed change(s) since the last run" if events
+                                   else "No confirmed changes since the last run")
+                                  + (f"; {waiting} possible change(s) will be confirmed or dropped on the next run"
+                                     if waiting else ""))
             session.add(run)
             session.commit()
             watch_id = run.watch_id
         # Emit only after commit: emit() writes the trace in its own session.
         if watch_id:
-            emit("change_detector", "end", change_summary, {"kinds": kinds})
+            emit("change_detector", "end", change_summary, {"kinds": kinds, **stats})
             if email and send_email(*email):
                 emit("change_detector", "end", f"Emailed the change brief to {email[0]}")
     except RunCancelled:

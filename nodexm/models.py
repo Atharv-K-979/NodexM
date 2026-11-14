@@ -180,6 +180,12 @@ class LedgerClaim(SQLModel, table=True):
     first_seen_run: str = Field(max_length=32)
     last_seen_run: str = Field(max_length=32)
     misses: int = 0
+    # A change is only alerted once it is confirmed; until then it waits here.
+    pending_status: Optional[str] = Field(default=None, max_length=16)
+    pending_runs: int = 0
+    confirmed: bool = True  # False for a new single-source claim seen only once ("candidate")
+    evidence: Optional[list] = Field(default=None, sa_column=Column(JSON, nullable=True))  # latest quotes
+    source_keys: Optional[list] = Field(default=None, sa_column=Column(JSON, nullable=True))  # every independent source seen
     created_at: datetime = Field(default_factory=utcnow)
     updated_at: datetime = Field(default_factory=utcnow)
 
@@ -195,6 +201,11 @@ class ChangeEvent(SQLModel, table=True):
     to_status: Optional[str] = Field(default=None, max_length=16)
     claim_text: str = _text()
     detail: str = _text()
+    confirmation: str = Field(default="", max_length=24)  # repeat | new_source | strong | stale
+    evidence_before: Optional[list] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    evidence_after: Optional[list] = Field(default=None, sa_column=Column(JSON, nullable=True))
+    feedback: Optional[str] = Field(default=None, max_length=8)  # real | noise, from the user
+    feedback_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=utcnow)
 
 

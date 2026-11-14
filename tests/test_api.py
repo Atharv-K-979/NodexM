@@ -149,3 +149,41 @@ def test_watch_lifecycle(client):
     assert client.delete(f"/api/watches/{w['id']}", headers=headers).status_code == 204
     # the answer stays visible in its thread
     assert client.get(f"/api/threads/{detail['thread_id']}", headers=headers).json()["runs"]
+
+
+def test_change_feedback_and_feed(client):
+    from sqlmodel import Session
+
+    from nodexm.db import engine
+    from nodexm.models import ChangeEvent, LedgerClaim
+
+    headers = signup(client)
+    w = client.post("/api/watches", headers=headers, json={"topic": "Acme pricing", "cadence": "manual"}).json()
+    run = client.post(f"/api/watches/{w['id']}/run", headers=headers).json()
+    wait_done(client, headers, run["id"])
+    with Session(engine) as s:
+        lc = LedgerClaim(watch_id=w["id"], text="Acme Pro costs $49", status="disputed", first_seen_run=run["id"],
+                         last_seen_run=run["id"])
+        s.add(lc)
+        s.flush()
+        e = ChangeEvent(watch_id=w["id"], run_id=run["id"], ledger_claim_id=lc.id, kind="status_changed",
+                        from_status="agreed", to_status="disputed", claim_text=lc.text, confirmation="new_source",
+                        evidence_before=[{"domain": "acme.com", "quote": "$49", "stance": "supports"}],
+                        evidence_after=[{"domain": "x.example", "quote": "$59", "stance": "contradicts"}])
+        s.add(e)
+        s.commit()
+        change_id = e.id
+
+    feed = client.get("/api/watches/changes", headers=headers).json()
+    assert feed["changes"][0]["watch_topic"] == "Acme pricing"
+    assert feed["changes"][0]["before"][0]["domain"] == "acme.com"
+    assert feed["quality"]["precision"] is None
+
+    r = client.post(f"/api/watches/{w['id']}/changes/{change_id}/feedback", headers=headers, json={"verdict": "real"})
+    assert r.status_code == 200 and r.json()["quality"] == {**r.json()["quality"], "reviewed": 1, "precision": 1.0}
+    assert client.get(f"/api/watches/{w['id']}", headers=headers).json()["changes"][0]["feedback"] == "real"
+
+    other = signup(client)
+    assert client.post(f"/api/watches/{w['id']}/changes/{change_id}/feedback", headers=other,
+                       json={"verdict": "noise"}).status_code == 404
+    assert client.get("/api/watches/changes", headers=other).json()["changes"] == []

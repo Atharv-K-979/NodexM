@@ -32,6 +32,20 @@ _ADDED_COLUMNS = {
     ],
     "sources": [("origin", "VARCHAR(64)", None)],
     "claims": [("independence", "JSON", None)],
+    "ledger_claims": [
+        ("pending_status", "VARCHAR(16)", None),
+        ("pending_runs", "INTEGER NOT NULL DEFAULT 0", None),
+        ("confirmed", "BOOLEAN NOT NULL DEFAULT 1", None),
+        ("evidence", "JSON", None),
+        ("source_keys", "JSON", None),
+    ],
+    "change_events": [
+        ("confirmation", "VARCHAR(24) NOT NULL DEFAULT ''", None),
+        ("evidence_before", "JSON", None),
+        ("evidence_after", "JSON", None),
+        ("feedback", "VARCHAR(8)", None),
+        ("feedback_at", "DATETIME", None),
+    ],
 }
 
 

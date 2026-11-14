@@ -136,17 +136,41 @@ def watch_out(session: Session, watch: Watch, detail: bool = False) -> dict:
     events = session.exec(select(ChangeEvent).where(ChangeEvent.watch_id == watch.id)
                           .order_by(ChangeEvent.created_at.desc()).limit(200 if detail else 5)).all()
     out["recent_changes"] = len(events)
+    out["quality"] = alert_quality(session, [watch.id])
     if detail:
-        ledger = session.exec(select(LedgerClaim).where(LedgerClaim.watch_id == watch.id)
+        ledger = session.exec(select(LedgerClaim).where(LedgerClaim.watch_id == watch.id,
+                                                        LedgerClaim.status != "dropped")
                               .order_by(LedgerClaim.updated_at.desc())).all()
         runs = session.exec(select(Run).where(Run.watch_id == watch.id).order_by(Run.created_at.desc())).all()
-        out["changes"] = [{
-            "id": e.id, "run_id": e.run_id, "kind": e.kind, "from_status": e.from_status, "to_status": e.to_status,
-            "claim": e.claim_text, "detail": e.detail, "created_at": iso(e.created_at),
-        } for e in events]
+        out["changes"] = [change_out(e) for e in events]
         out["ledger"] = [{
             "id": c.id, "text": c.text, "status": c.status, "confidence": c.confidence,
+            "confirmed": c.confirmed, "pending_status": c.pending_status, "pending_runs": c.pending_runs,
+            "sources": len(c.source_keys or []),
             "first_seen_run": c.first_seen_run, "last_seen_run": c.last_seen_run, "updated_at": iso(c.updated_at),
         } for c in ledger]
         out["runs"] = [run_summary(r) for r in runs]
     return out
+
+
+def change_out(e: ChangeEvent, watch: Watch | None = None) -> dict:
+    out = {
+        "id": e.id, "watch_id": e.watch_id, "run_id": e.run_id, "kind": e.kind, "from_status": e.from_status,
+        "to_status": e.to_status, "claim": e.claim_text, "detail": e.detail, "confirmation": e.confirmation,
+        "before": e.evidence_before or [], "after": e.evidence_after or [], "feedback": e.feedback,
+        "created_at": iso(e.created_at),
+    }
+    if watch is not None:
+        out.update(watch_topic=watch.topic, thread_id=watch.thread_id)
+    return out
+
+
+def alert_quality(session: Session, watch_ids: list[int]) -> dict:
+    """Alert precision from the user's own verdicts: real changes / (real + noise)."""
+    if not watch_ids:
+        return {"alerts": 0, "reviewed": 0, "real": 0, "noise": 0, "precision": None}
+    rows = session.exec(select(ChangeEvent.feedback).where(ChangeEvent.watch_id.in_(watch_ids))).all()
+    real = sum(1 for f in rows if f == "real")
+    noise = sum(1 for f in rows if f == "noise")
+    return {"alerts": len(rows), "reviewed": real + noise, "real": real, "noise": noise,
+            "precision": round(real / (real + noise), 3) if real + noise else None}

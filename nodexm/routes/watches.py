@@ -11,8 +11,8 @@ from ..auth import get_current_user
 from ..cadence import CADENCES, cron_for, next_run_time
 from ..db import get_session
 from ..jobs import RunRefused, create_run
-from ..models import ChangeEvent, Claim, LedgerClaim, Run, Thread, User, Watch
-from ..serializers import run_detail, watch_out
+from ..models import ChangeEvent, Claim, LedgerClaim, Run, Thread, User, Watch, utcnow
+from ..serializers import alert_quality, change_out, run_detail, watch_out
 from .threads import delete_runs
 
 router = APIRouter(prefix="/api/watches", tags=["watches"])
@@ -25,6 +25,10 @@ class WatchIn(BaseModel):
     mode: Literal["auto", "quick", "deep"] = "auto"
     email_alerts: bool = True
     thread_id: Optional[str] = None
+
+
+class FeedbackIn(BaseModel):
+    verdict: Optional[Literal["real", "noise"]] = Field(default=None, description="null clears the verdict")
 
 
 class WatchPatch(BaseModel):
@@ -46,6 +50,17 @@ def own_watch(session: Session, watch_id: int, user: User) -> Watch:
 def list_watches(user: User = Depends(get_current_user), session: Session = Depends(get_session)) -> list[dict]:
     rows = session.exec(select(Watch).where(Watch.user_id == user.id).order_by(Watch.created_at.desc())).all()
     return [watch_out(session, w) for w in rows]
+
+
+@router.get("/changes")
+def recent_changes(limit: int = 30, user: User = Depends(get_current_user),
+                   session: Session = Depends(get_session)) -> dict:
+    """Confirmed changes across all of the user's Watches, newest first, plus alert precision."""
+    watches = {w.id: w for w in session.exec(select(Watch).where(Watch.user_id == user.id)).all()}
+    events = session.exec(select(ChangeEvent).where(ChangeEvent.watch_id.in_(list(watches) or [-1]))
+                          .order_by(ChangeEvent.created_at.desc()).limit(min(max(limit, 1), 200))).all()
+    return {"changes": [change_out(e, watches[e.watch_id]) for e in events],
+            "quality": alert_quality(session, list(watches))}
 
 
 @router.get("/cadences")
@@ -93,6 +108,21 @@ def update_watch(watch_id: int, body: WatchPatch, user: User = Depends(get_curre
     session.add(watch)
     session.commit()
     return watch_out(session, watch, detail=True)
+
+
+@router.post("/{watch_id}/changes/{change_id}/feedback")
+def change_feedback(watch_id: int, change_id: int, body: FeedbackIn, user: User = Depends(get_current_user),
+                    session: Session = Depends(get_session)) -> dict:
+    """Mark an alert as a real change or as noise. This is how alert precision is measured."""
+    watch = own_watch(session, watch_id, user)
+    event = session.get(ChangeEvent, change_id)
+    if not event or event.watch_id != watch.id:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Change not found.")
+    event.feedback = body.verdict
+    event.feedback_at = utcnow() if body.verdict else None
+    session.add(event)
+    session.commit()
+    return {"change": change_out(event), "quality": alert_quality(session, [watch.id])}
 
 
 @router.post("/{watch_id}/run", status_code=201)
