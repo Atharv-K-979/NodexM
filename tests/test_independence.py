@@ -95,3 +95,19 @@ def test_pipeline_downgrades_agreement_that_rests_on_one_wire_story(monkeypatch)
     assert claim["independence"] == {**claim["independence"], "independent": 1, "sites": 3}
     assert "one original source (Reuters)" in claim["note"]
     assert any(n == "verifier" and "rest on one original source" in s for n, s in events)
+
+
+def test_sources_crediting_the_same_organisation_count_once():
+    sources = {
+        0: src("bbc.co.uk", "UK inflation fell to 2.3% in October, according to the Office for National Statistics."),
+        1: src("theguardian.com", "Consumer price inflation eased to 2.3% last month, official figures from the ONS showed."),
+        2: src("ft.com", "Our own basket of 500 prices rose 2.3% in October, the FT's tracker found."),
+    }
+    members = [
+        member(0, sources, "UK inflation fell to 2.3% in October"),
+        member(1, sources, "Consumer price inflation eased to 2.3% last month"),
+        member(2, sources, "Our own basket of 500 prices rose 2.3% in October"),
+    ]
+    groups, reasons = independence_groups(members, sources)
+    assert sorted(map(sorted, groups)) == [[0, 1], [2]]
+    assert any("ONS" in r or "Office For National Statistics" in r for r in reasons)

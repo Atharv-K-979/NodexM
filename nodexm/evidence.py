@@ -123,7 +123,7 @@ WIRES: dict[str, list[str]] = {
     "Reuters": ["reuters"],
     "Associated Press": ["associated press", "ap news", "ap"],
     "AFP": ["afp", "agence france-presse", "agence france presse"],
-    "Bloomberg": ["bloomberg news"],
+    "Bloomberg": ["bloomberg news", "bloomberg"],
     "PTI": ["press trust of india", "pti"],
     "ANI": ["asian news international", "ani"],
     "IANS": ["ians"],
@@ -176,6 +176,36 @@ def source_origin(text: str, domain: str) -> str | None:
         if pattern.search(head) or (tail and pattern.search(tail)):
             return name
     return None
+
+
+_ORG_WORDS = r"(?:[A-Z][\w&'.-]*)(?:\s+(?:of|for|and|on|the|de|du|des|&)?\s*[A-Z][\w&'.-]*){0,6}"
+_ATTRIBUTED_TO = re.compile(
+    r"(?i:according to|figures from|data from|statistics from|estimates? from|a report (?:by|from)|"
+    r"reported by|published by)\s+(?:[Tt]he\s+)?(" + _ORG_WORDS + r")")
+_ORG_THEN_VERB = re.compile(
+    r"\b(?:the\s+)?(" + _ORG_WORDS + r"|[A-Z]{2,6})\s+(?:said|says|showed|shows|estimates|estimated|reported|"
+    r"found|data showed|figures showed|figures show)\b")
+_NOT_ORGS = {"The", "This", "That", "It", "He", "She", "They", "We", "Our", "Officials", "Analysts", "Experts",
+             "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday", "Data", "Figures"}
+
+
+def attributed_sources(context: str) -> set[str]:
+    """Names of organisations the text credits ("according to the Office for National Statistics",
+    "the ONS showed"), each as lower-case name and as initials so 'ONS' matches the full name."""
+    keys: set[str] = set()
+    for pattern in (_ATTRIBUTED_TO, _ORG_THEN_VERB):
+        for m in pattern.finditer(context):
+            name = m.group(1).strip(" .,'")
+            words = [w for w in re.split(r"\s+", name) if w]
+            if not words or words[0] in _NOT_ORGS or (len(words) == 1 and not name.isupper() and len(name) < 4):
+                continue
+            keys.add(name.lower())
+            initials = "".join(w[0] for w in words if w[0].isupper())
+            if len(words) >= 2 and len(initials) >= 2:
+                keys.add(initials.lower())
+            if name.isupper():
+                keys.add(name.lower())
+    return keys
 
 
 def _norm_quote(q: str) -> str:
@@ -235,13 +265,34 @@ def independence_groups(members: list[dict], sources: dict[int, dict], *, quote_
         start, end = m.get("start", -1), m.get("end", -1)
         if start < 0 or not text:
             continue
-        context = text[max(0, start - window):end + window].lower()
+        context = text[max(0, start - window):end + window]
         for b in idxs:
             lb = labels[b]
             if b == a or len(lb) < 3 or lb in GENERIC_LABELS or lb == labels[a]:
                 continue
-            if re.search(r"\b" + re.escape(lb) + r"\b", context):
+            # Case-sensitive on purpose: organisations appear as "WHO", "IEA" or "Reuters", while
+            # labels such as "who" are also ordinary words.
+            if re.search(r"\b(?:" + re.escape(lb.upper()) + "|" + re.escape(lb.capitalize()) + r")\b", context):
                 union(a, b, f"{sources[a].get('domain', '')} cites {sources[b].get('domain', '')}")
+
+    # (d) two sources crediting the same organisation (which may not be in the list itself)
+    credited: dict[int, set[str]] = {}
+    own = {i: {labels[i], sources[i].get("domain", "").lower()} for i in idxs}
+    for m in members:
+        a = m["source_idx"]
+        text = sources[a].get("text", "")
+        start, end = m.get("start", -1), m.get("end", -1)
+        if start < 0 or not text:
+            continue
+        found = attributed_sources(text[max(0, start - window):end + window]) - own[a]
+        credited.setdefault(a, set()).update(found)
+    for x in range(len(idxs)):
+        for y in range(x + 1, len(idxs)):
+            a, b = idxs[x], idxs[y]
+            shared = credited.get(a, set()) & credited.get(b, set())
+            if shared:
+                name = max(shared, key=len)
+                union(a, b, f"both credit {name.upper() if len(name) <= 6 else name.title()}")
 
     groups: dict[int, list[int]] = {}
     for i in idxs:
