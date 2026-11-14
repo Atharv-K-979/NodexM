@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { api, getToken, setToken, setUnauthorizedHandler } from "./api";
+import { googleSignOut } from "./components/GoogleButton";
 import type { Allowance, PublicConfig, User } from "./types";
 
 interface AuthPayload {
@@ -15,6 +16,7 @@ interface SessionValue {
   loading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, name: string) => Promise<void>;
+  signInWithGoogle: (credential: string) => Promise<void>;
   signOut: () => void;
   refresh: () => Promise<void>;
   apply: (data: { user?: User; allowance?: Allowance }) => void;
@@ -29,6 +31,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const signOut = useCallback(() => {
+    googleSignOut();
     setToken(null);
     setUser(null);
     setAllowance(null);
@@ -68,6 +71,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       signIn: async (email, password) => accept(await api<AuthPayload>("/api/auth/login", { body: { email, password } })),
       signUp: async (email, password, name) =>
         accept(await api<AuthPayload>("/api/auth/register", { body: { email, password, name } })),
+      signInWithGoogle: async (credential) =>
+        accept(await api<AuthPayload>("/api/auth/google", { body: { credential } })),
       signOut,
       refresh,
       apply: ({ user: u, allowance: a }) => {

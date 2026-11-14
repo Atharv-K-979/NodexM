@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from "react";
 import { ArrowRight, Quote, ShieldCheck, Telescope } from "lucide-react";
 import { useSession } from "../session";
+import GoogleButton from "./GoogleButton";
 import { Logo, Spinner } from "./ui";
 
 export default function AuthScreen() {
-  const { signIn, signUp, config } = useSession();
+  const { signIn, signUp, signInWithGoogle, config } = useSession();
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -78,7 +79,25 @@ export default function AuthScreen() {
             {mode === "signin" ? "Sign in to continue your research." : `Start with ${free} free runs. No card needed.`}
           </p>
 
-          <div className="mt-7 space-y-4">
+          {config?.google_client_id && (
+            <div className="mt-7">
+              <GoogleButton
+                clientId={config.google_client_id}
+                onCredential={async (credential) => {
+                  setError(null);
+                  await signInWithGoogle(credential);
+                }}
+                onError={setError}
+              />
+              <div className="mt-6 flex items-center gap-3 text-xs text-faint" aria-hidden>
+                <span className="h-px flex-1 bg-line" />
+                or with email
+                <span className="h-px flex-1 bg-line" />
+              </div>
+            </div>
+          )}
+
+          <div className={`${config?.google_client_id ? "mt-5" : "mt-7"} space-y-4`}>
             {mode === "signup" && (
               <div>
                 <label className="label" htmlFor="name">Name</label>

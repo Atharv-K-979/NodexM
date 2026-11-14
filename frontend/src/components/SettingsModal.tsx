@@ -82,6 +82,12 @@ function ProfileTab() {
         <span className="label">Email</span>
         <p className="text-sm text-muted">{user?.email}</p>
       </div>
+      <div>
+        <span className="label">Sign-in methods</span>
+        <p className="text-sm text-muted">
+          {[user?.sign_in.google && "Google", user?.sign_in.password && "Email and password"].filter(Boolean).join(" · ") || "–"}
+        </p>
+      </div>
       <button className="btn-primary" disabled={busy} onClick={() => save("/api/settings", { name }, "Profile saved")}>{busy ? <Spinner /> : "Save"}</button>
     </div>
   );

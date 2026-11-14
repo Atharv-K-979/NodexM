@@ -14,6 +14,8 @@ export interface User {
   name: string;
   preferences: Preferences;
   keys: { gemini: string; tavily: string };
+  avatar_url: string | null;
+  sign_in: { password: boolean; google: boolean };
   created_at: string;
 }
 
@@ -173,4 +175,5 @@ export interface PublicConfig {
   server_llm: boolean;
   web_search: boolean;
   email_alerts: boolean;
+  google_client_id: string | null;
 }

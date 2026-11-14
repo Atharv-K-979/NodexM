@@ -176,7 +176,11 @@ export default function Sidebar({ route, onClose, onCollapse }: Props) {
           up
           trigger={(toggle) => (
             <button onClick={toggle} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left hover:bg-card">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent">{initials}</span>
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-full object-cover" />
+              ) : (
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent/15 text-xs font-semibold text-accent">{initials}</span>
+              )}
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-sm font-medium">{user?.name}</span>
                 <span className="block truncate text-xs text-faint">{allowance?.unlimited ? quota : user?.email}</span>
